@@ -1,0 +1,62 @@
+# Ablation: Vary memory oversample ratio
+# Test ratios: [1.0, 1.5, 2.0, 3.0, 4.0]
+# Tests: optimal oversampling ratio
+
+model:
+  model_id: Qwen/Qwen3-VL-8B-Instruct
+  dtype: bfloat16
+  device_map: auto
+  load_in_8bit: false
+  load_in_4bit: false
+
+generation:
+  temperature: 1.5
+  top_k: 10
+  top_p: 1.0
+  do_sample: true
+  max_new_tokens: 512
+  min_new_tokens: 1
+
+data:
+  dataset_name: perception_test
+  split: train
+  data_path: ./data/perception_test
+  
+  # Video frame sampling
+  num_frames: 4
+  frame_sampling_strategy: uniform
+  resize_shortest_edge: 224
+  
+  # Oversample ratios to sweep over
+  memory_skill_oversample_ratios: [1.0, 1.5, 2.0, 3.0, 4.0]
+  skill_categories_file: ./configs/skill_categories.json
+
+training:
+  batch_size: 32
+  num_gpus: 8
+  num_workers: 8
+  pin_memory: true
+  prefetch_factor: 2
+  
+  # Performance
+  mixed_precision: bf16
+  gradient_checkpointing: false
+
+output:
+  output_dir: ./outputs/ablation_oversample_ratio_sweep
+  output_format: jsonl
+  save_interval: 100
+  sample_metadata: true
+  verify_samples: false
+
+logging:
+  log_level: INFO
+  log_interval: 10
+  wandb_project: ssd-vlm-ablations
+  wandb_entity: null
+  save_logs: true
+
+hardware:
+  cuda_visible_devices: 0,1,2,3,4,5,6,7
+  cudnn_deterministic: false
+  seed: 42

@@ -1,0 +1,1 @@
+"""SSD sample generation module."""

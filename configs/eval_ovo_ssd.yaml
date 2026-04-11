@@ -1,0 +1,46 @@
+# OVO-Bench Evaluation Configuration - SSD Model
+# Evaluates fine-tuned SSD-VLM on OVO-Bench with 4-frame budget
+
+model:
+  model_path: ./outputs/ssd_vlm_final
+  dtype: bfloat16
+  device_map: auto
+  load_in_8bit: false
+  use_lora: false
+  is_merged: true
+
+inference:
+  num_frames: 4
+  frame_sampling_strategy: uniform
+  resize_shortest_edge: 224
+  max_new_tokens: 512
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 1
+  do_sample: false
+  use_cache: true
+
+data:
+  dataset_name: ovo_bench
+  data_path: ./data/ovo_bench
+  split: test
+  batch_size: 16
+  num_workers: 4
+
+evaluation:
+  metrics:
+    - accuracy
+    - per_task_accuracy
+    - lock_fork_split
+  save_predictions: true
+  output_format: json
+  save_detailed_results: true
+  compare_with_base: true
+
+logging:
+  log_level: INFO
+  log_interval: 10
+
+hardware:
+  cuda_visible_devices: 0
+  seed: 42

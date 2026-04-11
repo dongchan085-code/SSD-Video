@@ -1,0 +1,47 @@
+# Frame Budget Sweep Configuration
+# Tests SSD-VLM performance across different frame budgets: 4, 8, 16, 32
+
+model:
+  model_path: ./outputs/ssd_vlm_final
+  dtype: bfloat16
+  device_map: auto
+  load_in_8bit: false
+  use_lora: false
+  is_merged: true
+
+sweep:
+  frame_budgets: [4, 8, 16, 32]
+  frame_sampling_strategy: uniform
+  resize_shortest_edge: 224
+
+inference:
+  max_new_tokens: 512
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 1
+  do_sample: false
+  use_cache: true
+
+data:
+  dataset_name: ovo_bench
+  data_path: ./data/ovo_bench
+  split: test
+  batch_size: 8
+  num_workers: 4
+
+evaluation:
+  metrics:
+    - accuracy
+    - per_task_accuracy
+    - lock_fork_split
+  save_predictions: true
+  output_format: json
+  output_dir: ./results/frame_sweep
+
+logging:
+  log_level: INFO
+  log_interval: 10
+
+hardware:
+  cuda_visible_devices: 0
+  seed: 42

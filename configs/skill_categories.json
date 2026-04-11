@@ -1,0 +1,54 @@
+{
+  "skill_categories": {
+    "perception": {
+      "name": "Perception",
+      "description": "Visual perception and scene understanding",
+      "oversample_ratio": 1.0,
+      "examples": ["color", "shape", "size", "location"]
+    },
+    "memory": {
+      "name": "Memory",
+      "description": "Semantic memory and fact recall",
+      "oversample_ratio": 2.0,
+      "examples": ["knowledge", "definition", "property", "relationship"]
+    },
+    "reasoning": {
+      "name": "Reasoning",
+      "description": "Logical and temporal reasoning",
+      "oversample_ratio": 1.0,
+      "examples": ["cause", "effect", "sequence", "comparison"]
+    }
+  },
+  "task_types": {
+    "OCR": {
+      "name": "Optical Character Recognition",
+      "category": "Lock",
+      "description": "Extract text from images"
+    },
+    "ATR": {
+      "name": "Action Type Recognition",
+      "category": "Lock",
+      "description": "Identify actions being performed"
+    },
+    "OJR": {
+      "name": "Object Jaccard Ratio",
+      "category": "Lock",
+      "description": "Locate objects in scenes"
+    },
+    "STU": {
+      "name": "Semantic Text Understanding",
+      "category": "Lock",
+      "description": "Understand semantic content"
+    },
+    "EPM": {
+      "name": "Event Prediction and Modeling",
+      "category": "Fork",
+      "description": "Predict future events"
+    },
+    "ASI": {
+      "name": "Analogical Scene Inference",
+      "category": "Fork",
+      "description": "Reason about scene analogies"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+# Temperature Sweep Configuration
+# Tests base model performance across sampling temperatures: 0.5 to 1.5
+
+model:
+  model_id: Qwen/Qwen3-VL-8B-Instruct
+  dtype: bfloat16
+  device_map: auto
+  load_in_8bit: false
+
+sweep:
+  temperatures: [0.5, 0.7, 0.9, 1.0, 1.2, 1.5]
+  num_frames: 4
+  frame_sampling_strategy: uniform
+  resize_shortest_edge: 224
+
+inference:
+  max_new_tokens: 512
+  top_p: 1.0
+  top_k: 10
+  do_sample: true
+  use_cache: true
+
+data:
+  dataset_name: ovo_bench
+  data_path: ./data/ovo_bench
+  split: test
+  batch_size: 8
+  num_workers: 4
+
+evaluation:
+  metrics:
+    - accuracy
+    - per_task_accuracy
+    - lock_fork_split
+  save_predictions: true
+  output_format: json
+  output_dir: ./results/temperature_sweep
+
+logging:
+  log_level: INFO
+  log_interval: 10
+
+hardware:
+  cuda_visible_devices: 0
+  seed: 42

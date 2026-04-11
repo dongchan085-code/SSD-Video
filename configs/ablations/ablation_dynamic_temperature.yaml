@@ -1,0 +1,49 @@
+# Ablation: Dynamic temperature baseline at inference
+# Classify each query as Lock or Fork, use temp=0.3 for Lock, temp=1.2 for Fork
+# Tests: can query-level temperature control match SSD's internalized adaptation?
+
+model:
+  model_id: Qwen/Qwen3-VL-8B-Instruct
+  dtype: bfloat16
+  device_map: auto
+  load_in_8bit: false
+
+inference:
+  num_frames: 4
+  frame_sampling_strategy: uniform
+  resize_shortest_edge: 224
+  max_new_tokens: 512
+  
+  # Dynamic temperature settings
+  use_dynamic_temperature: true
+  temperature_lock: 0.3      # For perception-heavy tasks
+  temperature_fork: 1.2      # For reasoning-heavy tasks
+  
+  top_p: 1.0
+  top_k: 1
+  do_sample: true
+  use_cache: true
+
+data:
+  dataset_name: ovo_bench
+  data_path: ./data/ovo_bench
+  split: test
+  batch_size: 16
+  num_workers: 4
+
+evaluation:
+  metrics:
+    - accuracy
+    - per_task_accuracy
+    - lock_fork_split
+  save_predictions: true
+  output_format: json
+  save_detailed_results: true
+
+logging:
+  log_level: INFO
+  log_interval: 10
+
+hardware:
+  cuda_visible_devices: 0
+  seed: 42
