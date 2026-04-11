@@ -209,24 +209,50 @@ Answer:"""
     def _extract_choice(self, text: str) -> Optional[int]:
         """
         Extract choice index from generated text.
-        
+
+        Priority order:
+        1. Explicit "answer is X" / "answer: X" patterns
+        2. Leading choice letter at start of text ("A.", "A)", "A ")
+        3. Parenthesised choice "(A)"
+        4. Bare word-boundary choice letter
+        5. Digit (0-3)
+
         Args:
             text: Generated text
-        
+
         Returns:
             Choice index (0-3) or None
         """
-        # Try to extract A, B, C, or D
-        text_upper = text.upper()
-        for i, choice in enumerate(['A', 'B', 'C', 'D']):
-            if choice in text_upper:
-                return i
-        
-        # Try to extract numbers
-        for i in range(4):
-            if str(i) in text or chr(ord('0') + i) in text:
-                return i
-        
+        import re
+
+        text_stripped = text.strip()
+        text_upper = text_stripped.upper()
+
+        # 1. "answer is X" / "answer: X" / "answer = X"
+        m = re.search(r'ANSWER\s*[IS:=]+\s*([A-D])\b', text_upper)
+        if m:
+            return ord(m.group(1)) - ord('A')
+
+        # 2. Leading letter: "A.", "A)", "A " or just "A" at start
+        m = re.match(r'^([A-D])[\.\)\s:]', text_upper)
+        if m:
+            return ord(m.group(1)) - ord('A')
+
+        # 3. Parenthesised: "(A)" or "[A]"
+        m = re.search(r'[\(\[]\s*([A-D])\s*[\)\]]', text_upper)
+        if m:
+            return ord(m.group(1)) - ord('A')
+
+        # 4. Word-boundary standalone letter
+        m = re.search(r'\b([A-D])\b', text_upper)
+        if m:
+            return ord(m.group(1)) - ord('A')
+
+        # 5. Digit fallback
+        m = re.search(r'\b([0-3])\b', text)
+        if m:
+            return int(m.group(1))
+
         return None
     
     def evaluate(

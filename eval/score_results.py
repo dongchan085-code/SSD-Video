@@ -117,7 +117,14 @@ class ResultsScorer:
         lock_accuracies = []
         fork_accuracies = []
         
-        for frame_key in sorted(results.keys()):
+        # Sort numerically (not alphabetically) to keep frame order 4 → 8 → 16 → 32
+        def _frame_sort_key(k):
+            try:
+                return int(k.split("_")[1])
+            except (IndexError, ValueError):
+                return 0
+
+        for frame_key in sorted(results.keys(), key=_frame_sort_key):
             if "frames_" in frame_key:
                 num_frames = int(frame_key.split("_")[1])
                 result = results[frame_key]
