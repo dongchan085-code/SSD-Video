@@ -16,7 +16,7 @@ import numpy as np
 import torch
 import yaml
 from tqdm import tqdm
-from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
+from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
 from ssd_vlm.data.perception_test_dataset import PerceptionTestDataset
 
@@ -70,7 +70,7 @@ class SSDSampleGenerator:
         # Load model and processor
         logger.info(f"Loading model: {model_id}")
         self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-        self.model = Qwen2VLForConditionalGeneration.from_pretrained(
+        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
             model_id,
             torch_dtype=self.torch_dtype,
             device_map=device_map,

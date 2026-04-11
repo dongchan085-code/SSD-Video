@@ -109,16 +109,16 @@ class PerceptionTestDataset(Dataset):
                 "video_id": video_id,
                 "question": annotation.get("question", ""),
                 "options": annotation.get("options", []),
-                "answer_idx": annotation.get("answer_idx", 0),
-                "skill_category": annotation.get("skill", ""),
-                "task_type": annotation.get("task_type", ""),
+                "answer_idx": annotation.get("answer_id", annotation.get("answer_idx", 0)),
+                "skill_category": annotation.get("area", annotation.get("skill", "")),
+                "task_type": annotation.get("reasoning", annotation.get("task_type", "")),
             }
             
             # Add base sample
             samples.append(sample)
             
             # Apply memory skill oversampling
-            if (annotation.get("skill", "") == "memory" and 
+            if (annotation.get("area", annotation.get("skill", "")) == "memory" and 
                 self.memory_skill_oversample_ratio > 1.0):
                 num_repeats = int(self.memory_skill_oversample_ratio - 1)
                 for _ in range(num_repeats):
