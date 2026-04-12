@@ -1,24 +1,27 @@
 # Mini OVO-Bench Evaluation Configuration
-# For local CPU/MPS validation with Qwen2-VL-2B-Instruct
+# For local CPU/MPS validation with Qwen3-VL-2B-Instruct
 
 model:
   model_id: Qwen/Qwen3-VL-2B-Instruct
   dtype: float32
   device_map: cpu
 
-evaluation:
+inference:
   num_frames: 4
   max_new_tokens: 32
-  batch_size: 1
-  frame_sampling_strategy: uniform
-  resize_shortest_edge: 224
+  temperature: 1.0
+  top_k: 1
 
 data:
   data_path: ./data/ovo_bench_mini
+  batch_size: 1
+  split: test
 
-output:
+evaluation:
   save_predictions: true
   save_per_task: true
+  frame_sampling_strategy: uniform
+  resize_shortest_edge: 224
 
 logging:
   log_level: INFO
