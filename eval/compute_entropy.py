@@ -20,7 +20,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
-from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+from transformers import AutoModelForImageTextToText, AutoProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ class EntropyComputer:
         logger.info(f"Loading model: {model_path}")
         self.processor = AutoProcessor.from_pretrained(
             model_path, trust_remote_code=True)
-        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+        self.model = AutoModelForImageTextToText.from_pretrained(
             model_path,
             torch_dtype=torch_dtype,
             device_map=device_map,

@@ -1,0 +1,76 @@
+# Mini LoRA Fine-tuning Configuration
+# For local CPU/MPS validation with Qwen2-VL-2B-Instruct
+
+model:
+  model_id: Qwen/Qwen3-VL-2B-Instruct
+  dtype: float32
+  device_map: cpu
+  load_in_8bit: false
+  load_in_4bit: false
+
+lora:
+  r: 8
+  lora_alpha: 16
+  lora_dropout: 0.1
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - v_proj
+  modules_to_save: null
+  init_lora_weights: true
+
+training:
+  output_dir: ./outputs/mini/lora_checkpoint
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 1
+  learning_rate: 5.0e-4
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+
+  # Optimization
+  optim: adamw_torch
+  max_grad_norm: 1.0
+  gradient_checkpointing: false
+
+  # Logging and saving
+  logging_steps: 1
+  save_steps: 50
+  eval_steps: 50
+  save_total_limit: 1
+  load_best_model_at_end: false
+  early_stopping_patience: 3
+
+  # Platform
+  dataloader_num_workers: 0
+  dataloader_pin_memory: false
+  dataloader_drop_last: false
+  group_by_length: false
+
+  # DeepSpeed disabled for CPU
+  deepspeed: null
+
+  # Precision - CPU/MPS compatible
+  fp16: false
+  bf16: false
+  tf32: false
+
+data:
+  samples_path: ./outputs/mini/ssd_samples/samples.jsonl
+  num_frames: 4
+  frame_sampling_strategy: uniform
+  resize_shortest_edge: 224
+  max_seq_length: 256
+  vqa_buffer_ratio: 0.1
+
+evaluation:
+  eval_strategy: "no"
+
+wandb:
+  project: null
+  entity: null
+
+seed: 42

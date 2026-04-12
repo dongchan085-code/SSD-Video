@@ -16,8 +16,8 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import (
+    AutoModelForImageTextToText,
     AutoProcessor,
-    Qwen3VLForConditionalGeneration,
     get_scheduler,
 )
 
@@ -60,7 +60,7 @@ class FullFTTrainer:
         # Load model and processor
         logger.info(f"Loading model from: {model_path}")
         self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+        self.model = AutoModelForImageTextToText.from_pretrained(
             model_path,
             torch_dtype=torch.bfloat16,
             device_map="auto",

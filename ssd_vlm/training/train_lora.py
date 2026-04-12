@@ -17,8 +17,8 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import (
+    AutoModelForImageTextToText,
     AutoProcessor,
-    Qwen3VLForConditionalGeneration,
     get_scheduler,
 )
 
@@ -46,33 +46,43 @@ class LoRATrainer:
         output_dir: str,
         lora_config: Dict[str, Any],
         training_config: Dict[str, Any],
+        model_config: Optional[Dict[str, Any]] = None,
         device: str = "cuda",
     ):
         """
         Initialize LoRA trainer.
-        
+
         Args:
             model_id: HuggingFace model ID
             output_dir: Output directory for checkpoints
             lora_config: LoRA configuration
             training_config: Training hyperparameters
+            model_config: Model loading config (dtype, device_map)
             device: Device to train on
         """
         self.model_id = model_id
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.device = device
-        
+
         self.lora_config = lora_config
         self.training_config = training_config
-        
+
+        # Resolve dtype and device_map from model config
+        model_config = model_config or {}
+        dtype_str = model_config.get("dtype", "bfloat16")
+        dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16,
+                     "float32": torch.float32}
+        torch_dtype = dtype_map.get(dtype_str, torch.bfloat16)
+        device_map = model_config.get("device_map", "auto")
+
         # Load model and processor
         logger.info(f"Loading model: {model_id}")
         self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+        self.model = AutoModelForImageTextToText.from_pretrained(
             model_id,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
+            torch_dtype=torch_dtype,
+            device_map=device_map,
             trust_remote_code=True,
         )
         
@@ -299,6 +309,7 @@ def main():
         output_dir=args.output_dir,
         lora_config=config["lora"],
         training_config=config["training"],
+        model_config=config.get("model"),
     )
     
     # Load data

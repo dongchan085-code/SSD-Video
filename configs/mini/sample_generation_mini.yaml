@@ -1,0 +1,53 @@
+# Mini SSD Sample Generation Configuration
+# For local CPU/MPS validation with Qwen2-VL-2B-Instruct
+
+model:
+  model_id: Qwen/Qwen3-VL-2B-Instruct
+  dtype: float32
+  device_map: cpu
+  load_in_8bit: false
+  load_in_4bit: false
+
+generation:
+  temperature: 1.5
+  top_k: 10
+  top_p: 1.0
+  do_sample: true
+  max_new_tokens: 32
+  min_new_tokens: 1
+
+data:
+  dataset_name: perception_test
+  split: train
+  data_path: ./data/perception_test_mini
+  num_frames: 4
+  frame_sampling_strategy: uniform
+  resize_shortest_edge: 224
+  memory_skill_oversample_ratio: 2.0
+
+training:
+  batch_size: 1
+  num_gpus: 1
+  num_workers: 0
+  pin_memory: false
+  prefetch_factor: 2
+  mixed_precision: "no"
+  gradient_checkpointing: false
+
+output:
+  output_dir: ./outputs/mini/ssd_samples
+  output_format: jsonl
+  save_interval: 5
+  sample_metadata: true
+  verify_samples: false
+
+logging:
+  log_level: INFO
+  log_interval: 1
+  wandb_project: null
+  wandb_entity: null
+  save_logs: true
+
+hardware:
+  cudnn_deterministic: false
+  seed: 42
