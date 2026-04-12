@@ -131,6 +131,10 @@ def main():
                         help="comparison JSON from score_results")
     parser.add_argument("--sweep", default=None,
                         help="temperature sweep comparison JSON")
+    parser.add_argument("--latency_results", default=None,
+                        help="Path to results JSON with latency measurements")
+    parser.add_argument("--use_mock_data", action="store_true",
+                        help="Use mock data instead of real results")
     parser.add_argument("--output",
                         default="./figures/outputs/pareto_frontier.pdf")
     args = parser.parse_args()
@@ -138,12 +142,11 @@ def main():
     logging.basicConfig(level=logging.INFO)
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
 
-    # Try to load real data; fall back to mock
     methods = dict(MOCK_METHODS)
     temp_sweep = list(MOCK_TEMP_SWEEP)
     ssd_point = MOCK_SSD
 
-    if args.comparison:
+    if not args.use_mock_data and args.comparison:
         data = _load_json(args.comparison)
         if data and "improvement" in data:
             imp = data["improvement"]
@@ -151,6 +154,13 @@ def main():
                 imp.get("fork_accuracy", MOCK_SSD[0]) * 100,
                 imp.get("lock_accuracy", MOCK_SSD[1]) * 100,
             )
+    if not args.use_mock_data and args.sweep:
+        sweep_data = _load_json(args.sweep)
+        if sweep_data and "points" in sweep_data:
+            temp_sweep = [
+                (p["delta_mem"], p["delta_rt"])
+                for p in sweep_data["points"]
+            ]
 
     plot_pareto(methods, temp_sweep, ssd_point, args.output)
     logger.info(f"Done: {args.output}")

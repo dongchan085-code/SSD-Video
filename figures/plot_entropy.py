@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import numpy as np
 
 from style import apply_style, COLORS, save_figure
@@ -192,10 +193,6 @@ def plot_entropy(data: Dict[str, Any], output_path: str):
     fig.tight_layout()
     save_figure(fig, output_path)
     plt.close(fig)
-
-
-# need mpatches for legend
-import matplotlib.patches as mpatches
 
 
 def main():

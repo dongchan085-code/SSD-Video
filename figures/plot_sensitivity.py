@@ -364,7 +364,9 @@ def main():
     parser = argparse.ArgumentParser(description="Plot hyperparameter sensitivity results")
     parser.add_argument("--output_dir", type=str, default="./figures/outputs",
                        help="Output directory")
-    parser.add_argument("--use_mock_data", action="store_true", default=True,
+    parser.add_argument("--results_dir", type=str, default=None,
+                       help="Directory with sensitivity result JSONs")
+    parser.add_argument("--use_mock_data", action="store_true",
                        help="Use mock data for demonstration")
     
     args = parser.parse_args()
