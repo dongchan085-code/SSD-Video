@@ -169,22 +169,18 @@ Answer:"""
             }
         ]
         
-        text = self.processor.apply_chat_template(
+        # Unified apply_chat_template (Qwen3-VL API)
+        inputs = self.processor.apply_chat_template(
             messages,
-            tokenize=False,
+            tokenize=True,
             add_generation_prompt=True,
-        )
-        
-        # Process input (simplified)
-        inputs = self.processor(
-            text=[text],
-            images=[frames],
-            padding=True,
+            return_dict=True,
             return_tensors="pt",
         )
-        
+        inputs.pop("token_type_ids", None)
+
         # Move to device
-        inputs = {k: v.to(self.model.device) if torch.is_tensor(v) else v 
+        inputs = {k: v.to(self.model.device) if torch.is_tensor(v) else v
                  for k, v in inputs.items()}
         
         # Generate

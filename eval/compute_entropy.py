@@ -128,15 +128,11 @@ class EntropyComputer:
             messages[0]["content"].insert(
                 0, {"type": "image", "image": frames})
 
-        text = self.processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True)
-
-        inputs = self.processor(
-            text=[text],
-            images=[frames] if frames is not None else None,
-            padding=True,
-            return_tensors="pt",
-        )
+        # Unified apply_chat_template (Qwen3-VL API)
+        inputs = self.processor.apply_chat_template(
+            messages, tokenize=True, add_generation_prompt=True,
+            return_dict=True, return_tensors="pt")
+        inputs.pop("token_type_ids", None)
         inputs = {k: v.to(self.model.device) if torch.is_tensor(v) else v
                   for k, v in inputs.items()}
 
