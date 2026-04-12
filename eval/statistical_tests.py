@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy import stats
-from scipy.stats import binom_test
 
 logger = logging.getLogger(__name__)
 
