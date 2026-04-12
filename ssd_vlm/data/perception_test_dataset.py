@@ -239,6 +239,7 @@ def create_perception_test_dataloader(
         **kwargs
     )
     
+    use_workers = num_workers > 0
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -246,6 +247,8 @@ def create_perception_test_dataloader(
         shuffle=shuffle,
         pin_memory=pin_memory,
         drop_last=(split == "train"),
+        persistent_workers=True if use_workers else False,
+        prefetch_factor=4 if use_workers else None,
     )
 
 

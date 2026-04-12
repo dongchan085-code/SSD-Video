@@ -265,7 +265,10 @@ def _make_loader(
     shuffle: bool,
     pin_memory: bool,
     drop_last: bool,
+    persistent_workers: bool = False,
+    prefetch_factor: int = 2,
 ) -> DataLoader:
+    use_workers = num_workers > 0
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -274,6 +277,8 @@ def _make_loader(
         pin_memory=pin_memory,
         collate_fn=collator,
         drop_last=drop_last and len(dataset) >= batch_size,
+        persistent_workers=persistent_workers if use_workers else False,
+        prefetch_factor=prefetch_factor if use_workers else None,
     )
 
 
@@ -295,6 +300,8 @@ def create_ssd_sample_dataloaders(
     drop_last: bool = False,
     enable_cache: bool = True,
     seed: int = 42,
+    persistent_workers: bool = False,
+    prefetch_factor: int = 2,
 ) -> Tuple[DataLoader, Optional[DataLoader]]:
     dataset = SSDSampleDataset(
         samples_path=samples_path,
@@ -337,6 +344,8 @@ def create_ssd_sample_dataloaders(
             shuffle=True,
             pin_memory=pin_memory,
             drop_last=drop_last,
+            persistent_workers=persistent_workers,
+            prefetch_factor=prefetch_factor,
         )
         eval_dataloader = _make_loader(
             dataset=eval_dataset,
@@ -346,6 +355,8 @@ def create_ssd_sample_dataloaders(
             shuffle=False,
             pin_memory=pin_memory,
             drop_last=False,
+            persistent_workers=persistent_workers,
+            prefetch_factor=prefetch_factor,
         )
     else:
         train_dataloader = _make_loader(
@@ -356,6 +367,8 @@ def create_ssd_sample_dataloaders(
             shuffle=True,
             pin_memory=pin_memory,
             drop_last=drop_last,
+            persistent_workers=persistent_workers,
+            prefetch_factor=prefetch_factor,
         )
 
     return train_dataloader, eval_dataloader

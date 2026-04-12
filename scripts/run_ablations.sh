@@ -11,7 +11,7 @@ PROJECT_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 DATA_DIR="${1:-./${PROJECT_DIR}/data}"
 OUTPUT_DIR="${2:-./${PROJECT_DIR}/outputs}"
 RESULTS_DIR="${3:-./${PROJECT_DIR}/results}"
-NUM_GPUS="${4:-8}"
+NUM_GPUS="${4:-4}"
 
 echo "==========================================="
 echo "SSD-VLM Ablation Studies"
