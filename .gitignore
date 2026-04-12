@@ -47,6 +47,7 @@ env/
 
 # Data and models
 data/
+!ssd_vlm/data/
 outputs/
 results/
 checkpoints/
