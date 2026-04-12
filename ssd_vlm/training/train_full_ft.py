@@ -1,6 +1,7 @@
 """
-Full-parameter Fine-tuning for SSD-VLM (Stage 2).
-After LoRA training, perform full-parameter fine-tuning on merged checkpoint.
+Full-parameter Fine-tuning for SSD-VLM (Ablation Only).
+This is NOT part of the main method — the paper uses LoRA-only.
+Available as an ablation baseline via configs/ablations/ablation_full_ft_only.yaml.
 """
 
 import argparse

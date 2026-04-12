@@ -1,5 +1,6 @@
+# ABLATION ONLY — not part of the main SSD-VLM method (paper uses LoRA-only).
+# See configs/ablations/ablation_full_ft_only.yaml for the ablation variant.
 # Full-parameter Fine-tuning Configuration
-# Stage 2: Full parameter fine-tuning after LoRA (merged checkpoint)
 
 model:
   model_id: Qwen/Qwen3-VL-8B-Instruct

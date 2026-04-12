@@ -9,7 +9,7 @@ This project implements Simple Self-Distillation for vision language models, ena
 ### Key Innovation
 - **Label-free fine-tuning**: Sample completions from a frozen Qwen3-VL-8B-Instruct model at high temperature (1.5), then fine-tune on raw samples without any external rewards or verification
 - **Streaming efficiency**: Optimize for a 4-frame budget in the SimpleStream inference protocol
-- **Two-stage training**: LoRA fine-tuning (rank 128, alpha 256) followed by full-parameter fine-tuning
+- **LoRA fine-tuning**: rank 128, alpha 256 — the paper method (full-parameter FT available as ablation only)
 - **Comprehensive evaluation**: Test on OVO-Bench with detailed per-task breakdown (Lock vs Fork task categories)
 
 ### Training Data
@@ -108,30 +108,7 @@ torchrun --nproc_per_node=8 ssd_vlm/training/train_lora.py \
 
 **Output**: LoRA checkpoint (can be merged or used with base model)
 
-### 3. Full-parameter Fine-tuning
-
-Merge LoRA and perform full-parameter fine-tuning:
-
-```bash
-torchrun --nproc_per_node=8 ssd_vlm/training/train_full_ft.py \
-  --config configs/train_full_ft.yaml \
-  --lora_checkpoint ./outputs/lora_checkpoint \
-  --samples_path ./outputs/ssd_samples/samples.jsonl \
-  --output_dir ./outputs/ssd_vlm_final
-```
-
-**Config parameters**:
-- `learning_rate`: 2e-5
-- `batch_size`: 1 (per GPU)
-- `gradient_accumulation_steps`: 16
-- `num_epochs`: 1
-- `use_deepspeed`: true
-- `deepspeed_config`: deepspeed_zero3.json
-- `save_safetensors`: true
-
-**Output**: Full SSD-VLM checkpoint ready for evaluation
-
-### 4. Evaluation on OVO-Bench
+### 3. Evaluation on OVO-Bench
 
 Evaluate both base model and SSD-VLM:
 
@@ -149,7 +126,7 @@ python eval/eval_ovo_bench.py \
   --output_file ./results/ovo_ssd.json
 ```
 
-### 5. Detailed Analysis
+### 4. Detailed Analysis
 
 Run ablation studies and sweeps:
 
@@ -167,7 +144,7 @@ python eval/eval_temperature_sweep.py \
   --output_dir ./results/temperature_sweep
 ```
 
-### 6. Visualization
+### 5. Visualization
 
 Generate publication-quality figures:
 
@@ -194,12 +171,11 @@ bash scripts/run_full_pipeline.sh \
 This script will:
 1. Download data (if needed)
 2. Generate SSD samples from frozen model
-3. LoRA fine-tuning
-4. Full-parameter fine-tuning
-5. OVO-Bench evaluation (base + SSD)
-6. Frame and temperature sweeps
-7. Generate all figures
-8. Create a comprehensive results report
+3. LoRA fine-tuning (paper method)
+4. OVO-Bench evaluation (base + SSD)
+5. Frame and temperature sweeps
+6. Generate all figures
+7. Create a comprehensive results report
 
 ## Project Structure
 
@@ -211,7 +187,7 @@ ssd-vlm/
 ├── configs/                          # Configuration files (YAML)
 │   ├── sample_generation.yaml       # SSD sampling config
 │   ├── train_lora.yaml              # LoRA fine-tuning config
-│   ├── train_full_ft.yaml           # Full FT config
+│   ├── train_full_ft.yaml           # Full FT config (ablation only)
 │   ├── eval_ovo_base.yaml           # Base model eval
 │   ├── eval_ovo_ssd.yaml            # SSD model eval
 │   ├── eval_ovo_frame_sweep.yaml    # Frame budget sweep
@@ -228,7 +204,7 @@ ssd-vlm/
 │   └── training/                    # Training pipelines
 │       ├── __init__.py
 │       ├── train_lora.py
-│       ├── train_full_ft.py
+│       ├── train_full_ft.py          # Ablation only
 │       └── utils.py
 ├── eval/                            # Evaluation (SimpleStream adapted)
 │   ├── __init__.py
@@ -263,12 +239,6 @@ ssd-vlm/
 - **Learning rate**: 5e-4
 - **Epochs**: 2 (with early stopping)
 - **Batch size**: 2 per GPU (16 with gradient accumulation)
-
-### Full-parameter Fine-tuning
-- **Learning rate**: 2e-5 (much lower)
-- **Epochs**: 1
-- **Batch size**: 1 per GPU (16 with gradient accumulation)
-- **DeepSpeed**: ZeRO-3 for memory efficiency
 
 ### Evaluation
 - **Frame budget**: 4 (primary), also test 8, 16, 32

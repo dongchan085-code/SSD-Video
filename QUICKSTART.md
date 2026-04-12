@@ -30,9 +30,8 @@ bash scripts/run_full_pipeline.sh ./data ./outputs ./results 8
 This runs:
 1. Data prep
 2. SSD sampling (frozen model, high-temp)
-3. LoRA fine-tuning (Stage 1)
-4. Full parameter fine-tuning (Stage 2)
-5. OVO-Bench evaluation
+3. LoRA fine-tuning (paper method)
+4. OVO-Bench evaluation
 6. Ablation studies (frame, temperature sweeps)
 7. Figure generation
 8. Results aggregation
@@ -56,16 +55,6 @@ torchrun --nproc_per_node=8 \
   --config configs/train_lora.yaml \
   --samples_path ./outputs/ssd_samples/samples.jsonl \
   --output_dir ./outputs/lora_checkpoint
-```
-
-### Full Parameter FT (8 GPUs)
-```bash
-torchrun --nproc_per_node=8 \
-  ssd_vlm/training/train_full_ft.py \
-  --config configs/train_full_ft.yaml \
-  --samples_path ./outputs/ssd_samples/samples.jsonl \
-  --lora_checkpoint ./outputs/lora_checkpoint \
-  --output_dir ./outputs/ssd_vlm_final
 ```
 
 ### Evaluate Base Model
@@ -119,7 +108,7 @@ python eval/score_results.py \
 ### Hyperparameters
 - `configs/sample_generation.yaml` - Sampling params (temperature, top-k)
 - `configs/train_lora.yaml` - LoRA rank, learning rate, epochs
-- `configs/train_full_ft.yaml` - FT learning rate, batch size
+- `configs/train_full_ft.yaml` - FT learning rate, batch size (ablation only)
 
 ### Model Paths
 All configs use relative paths. Update if using different directory structure:
@@ -143,11 +132,6 @@ outputs/
 │   ├── adapter_config.json
 │   ├── adapter_model.bin
 │   └── ...
-└── ssd_vlm_final/                 # Full fine-tuned model
-    ├── config.json
-    ├── model.safetensors
-    └── ...
-
 results/
 ├── ovo_base.json                  # Base model results
 ├── ovo_ssd.json                   # SSD-VLM results
@@ -169,7 +153,7 @@ figures/outputs/
 1. Reduce `per_device_train_batch_size` in config
 2. Increase `gradient_accumulation_steps`
 3. Enable gradient checkpointing
-4. Use DeepSpeed ZeRO-3 (already configured for full FT)
+4. Use DeepSpeed ZeRO-3 (see ablation configs)
 
 ### Slow Data Loading
 1. Check `num_workers` in data config
@@ -224,23 +208,12 @@ training:
   learning_rate: 5e-4
 ```
 
-### train_full_ft.yaml
-```yaml
-training:
-  num_train_epochs: 1
-  per_device_train_batch_size: 1
-  gradient_accumulation_steps: 16  # Effective batch: 16 per GPU
-  learning_rate: 2e-5  # Much lower than LoRA
-```
-
 ## Expected Results
 
-Typical improvements on OVO-Bench:
-- **Lock tasks** (perception): 3-5% absolute improvement
-- **Fork tasks** (reasoning): 1-2% absolute improvement
-- **Overall**: 2-3% absolute improvement
-
-Memory-accuracy tradeoff is favorable at 4-frame budget.
+SSD-VLM targets the Pareto expansion region (ΔRT ≥ 0, ΔMem > 0):
+- **Fork (memory) tasks**: primary improvement target
+- **Lock (perception) tasks**: accuracy preserved or marginally improved
+- **Zero additional latency**: merged LoRA adds no inference overhead
 
 ## Paper Figures
 

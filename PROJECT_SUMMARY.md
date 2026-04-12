@@ -22,13 +22,13 @@ This project implements Simple Self-Distillation (SSD) applied to Qwen3-VL-8B-In
 ### Configuration Files (`configs/`)
 - `sample_generation.yaml` - SSD sampling parameters (temperature 1.5, top-k 10, 4 frames, 2x memory oversampling)
 - `train_lora.yaml` - LoRA config (rank 128, alpha 256, 2 epochs, lr 5e-4)
-- `train_full_ft.yaml` - Full FT config (1 epoch, lr 2e-5, gradient accumulation 16)
+- `train_full_ft.yaml` - Full FT config (ablation only; 1 epoch, lr 2e-5)
 - `eval_ovo_base.yaml` - Base model evaluation on OVO-Bench
 - `eval_ovo_ssd.yaml` - SSD-VLM evaluation on OVO-Bench
 - `eval_ovo_frame_sweep.yaml` - Frame budget sweep (4, 8, 16, 32)
 - `eval_temperature_sweep.yaml` - Temperature sweep (0.5 to 1.5)
 - `deepspeed_zero2.json` - ZeRO-2 config for LoRA training
-- `deepspeed_zero3.json` - ZeRO-3 config for full FT (memory efficient)
+- `deepspeed_zero3.json` - ZeRO-3 config for full FT ablation
 - `skill_categories.json` - Task and skill category definitions
 
 ### Data Loading (`ssd_vlm/data/`)
