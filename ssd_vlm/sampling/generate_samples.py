@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 import yaml
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
@@ -118,110 +119,112 @@ Answer:"""
         """
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         num_samples = num_samples or len(dataset)
         samples_to_generate = min(num_samples, len(dataset))
-        
-        # Open output file
+
+        # Use a subset if needed
+        if samples_to_generate < len(dataset):
+            dataset = torch.utils.data.Subset(dataset, range(samples_to_generate))
+
+        # DataLoader for async prefetch — workers decode next frames while GPU runs inference
+        loader = DataLoader(
+            dataset,
+            batch_size=1,
+            num_workers=4,
+            persistent_workers=True,
+            prefetch_factor=8,
+            pin_memory=True,
+            shuffle=False,
+            collate_fn=lambda batch: batch[0],
+        )
+
         output_file = open(output_path, 'w')
-        
+        buffer: List[str] = []
+
         try:
             sample_count = 0
-            
-            with tqdm(total=samples_to_generate, desc="Generating samples") as pbar:
-                for idx in range(samples_to_generate):
-                    sample = dataset[idx]
-                    
-                    # Format prompt
-                    prompt = self._format_prompt(
-                        question=sample["question"],
-                        options=sample["options"],
-                    )
-                    
-                    # Prepare inputs
-                    # Note: This is simplified - actual implementation would handle images properly
-                    messages = [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "image": sample["frames"],  # [T, 3, H, W]
-                                },
-                                {
-                                    "type": "text",
-                                    "text": prompt,
-                                }
-                            ]
-                        }
-                    ]
-                    
-                    # Process input — unified apply_chat_template (Qwen3-VL API)
-                    inputs = self.processor.apply_chat_template(
-                        messages,
-                        tokenize=True,
-                        add_generation_prompt=True,
-                        return_dict=True,
-                        return_tensors="pt",
-                    )
-                    inputs.pop("token_type_ids", None)
-                    
-                    # Move inputs to device
-                    inputs = {k: v.to(self.model.device) if torch.is_tensor(v) else v 
-                             for k, v in inputs.items()}
-                    
-                    # Generate
-                    output_ids = self.model.generate(
-                        **inputs,
-                        max_new_tokens=self.max_new_tokens,
-                        temperature=self.temperature,
-                        top_k=self.top_k,
-                        top_p=self.top_p,
-                        do_sample=True,
-                        use_cache=True,
-                    )
-                    
-                    # Decode
-                    generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
-                    completion = self.processor.decode(
-                        generated_ids,
-                        skip_special_tokens=True,
-                    )
-                    
-                    # Build output sample
-                    output_sample = {
-                        "video_id": sample["video_id"],
-                        "question": sample["question"],
-                        "options": sample["options"],
-                        "answer_idx": sample["answer_idx"],
-                        "skill_category": sample["skill_category"],
-                        "task_type": sample["task_type"],
-                        "completion": completion,
-                        "completion_tokens": len(generated_ids),
-                        "temperature": self.temperature,
-                        "top_k": self.top_k,
-                        "source_data_path": sample.get("source_data_path"),
-                        "source_split": sample.get("source_split"),
-                        "video_relpath": sample.get("video_relpath"),
-                        "frame_indices": sample.get("frame_indices"),
-                        "total_frames": sample.get("total_frames"),
-                        "num_frames": int(sample["frames"].shape[0]),
+
+            for sample in tqdm(loader, total=len(loader), desc="Generating samples"):
+                prompt = self._format_prompt(
+                    question=sample["question"],
+                    options=sample["options"],
+                )
+
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": sample["frames"]},
+                            {"type": "text", "text": prompt},
+                        ]
                     }
-                    
-                    # Write to file
-                    output_file.write(json.dumps(output_sample) + "\n")
-                    
-                    sample_count += 1
-                    pbar.update(1)
-                    
-                    # Periodic save (file is already being written)
-                    if sample_count % save_interval == 0:
-                        output_file.flush()
-                        logger.info(f"Generated {sample_count} samples")
-        
+                ]
+
+                inputs = self.processor.apply_chat_template(
+                    messages,
+                    tokenize=True,
+                    add_generation_prompt=True,
+                    return_dict=True,
+                    return_tensors="pt",
+                )
+                inputs.pop("token_type_ids", None)
+
+                inputs = {k: v.to(self.model.device) if torch.is_tensor(v) else v
+                         for k, v in inputs.items()}
+
+                output_ids = self.model.generate(
+                    **inputs,
+                    max_new_tokens=self.max_new_tokens,
+                    temperature=self.temperature,
+                    top_k=self.top_k,
+                    top_p=self.top_p,
+                    do_sample=True,
+                    use_cache=True,
+                )
+
+                generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
+                completion = self.processor.decode(
+                    generated_ids,
+                    skip_special_tokens=True,
+                )
+
+                output_sample = {
+                    "video_id": sample["video_id"],
+                    "question": sample["question"],
+                    "options": sample["options"],
+                    "answer_idx": sample["answer_idx"],
+                    "skill_category": sample["skill_category"],
+                    "task_type": sample["task_type"],
+                    "completion": completion,
+                    "completion_tokens": len(generated_ids),
+                    "temperature": self.temperature,
+                    "top_k": self.top_k,
+                    "source_data_path": sample.get("source_data_path"),
+                    "source_split": sample.get("source_split"),
+                    "video_relpath": sample.get("video_relpath"),
+                    "frame_indices": sample.get("frame_indices"),
+                    "total_frames": sample.get("total_frames"),
+                    "num_frames": int(sample["frames"].shape[0]),
+                }
+
+                buffer.append(json.dumps(output_sample))
+                sample_count += 1
+
+                if len(buffer) >= save_interval:
+                    output_file.write("\n".join(buffer) + "\n")
+                    output_file.flush()
+                    buffer.clear()
+                    logger.info(f"Generated {sample_count} samples")
+
+            # Flush remaining
+            if buffer:
+                output_file.write("\n".join(buffer) + "\n")
+                output_file.flush()
+
         finally:
             output_file.close()
-        
+
         logger.info(f"Sample generation complete. Saved {sample_count} samples to {output_path}")
         return str(output_path)
 
