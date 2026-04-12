@@ -199,7 +199,6 @@ class SSDSampleDataCollator:
 
     def _collate_multimodal(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         full_conversations = []
-        prompt_conversations = []
 
         for feature in features:
             user_content = [
@@ -210,10 +209,8 @@ class SSDSampleDataCollator:
                 {"role": "user", "content": user_content},
                 {"role": "assistant", "content": [{"type": "text", "text": feature["completion"]}]},
             ])
-            prompt_conversations.append([
-                {"role": "user", "content": user_content},
-            ])
 
+        # Single apply_chat_template call (was 2x before)
         full_inputs = self.processor.apply_chat_template(
             full_conversations,
             tokenize=True,
@@ -225,26 +222,18 @@ class SSDSampleDataCollator:
                 "max_length": self.max_seq_length,
             },
         )
-        prompt_inputs = self.processor.apply_chat_template(
-            prompt_conversations,
-            tokenize=True,
-            add_generation_prompt=True,
-            return_dict=True,
-            return_tensors="pt",
-            processor_kwargs={
-                "padding": True,
-                "truncation": True,
-                "max_length": self.max_seq_length,
-            },
-        )
-
         full_inputs.pop("token_type_ids", None)
-        prompt_inputs.pop("token_type_ids", None)
 
+        # Compute prompt length by counting completion tokens from the end
         labels = full_inputs["input_ids"].clone()
         labels[full_inputs["attention_mask"] == 0] = -100
-        for row_idx in range(labels.size(0)):
-            prompt_len = int(prompt_inputs["attention_mask"][row_idx].sum().item())
+        tokenizer = self.processor.tokenizer
+        for row_idx, feature in enumerate(features):
+            comp_ids = tokenizer(
+                feature["completion"], add_special_tokens=False
+            )["input_ids"]
+            seq_len = int(full_inputs["attention_mask"][row_idx].sum().item())
+            prompt_len = max(0, seq_len - len(comp_ids))
             labels[row_idx, :min(prompt_len, labels.size(1))] = -100
 
         batch = dict(full_inputs)
