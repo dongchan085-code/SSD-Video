@@ -670,10 +670,13 @@ class TestOVOBenchEvaluatorLogic(unittest.TestCase):
             evaluator = OVOBenchEvaluator.__new__(OVOBenchEvaluator)
             evaluator.lock_tasks = {"OCR", "ATR", "OJR", "STU", "ACR", "FPD"}
             evaluator.fork_tasks = {"EPM", "ASI", "HLD"}
+            evaluator.num_frames = 4
+            evaluator.frame_sampling_strategy = "uniform"
+            evaluator.resize_shortest_edge = 224
 
-            samples = evaluator.load_ovo_dataset(self.tmp_dir, split="test")
-            self.assertEqual(len(samples), 20)
-            for s in samples:
+            dataset = evaluator.load_ovo_dataset(self.tmp_dir, split="test")
+            self.assertEqual(len(dataset), 20)
+            for s in dataset.samples:
                 self.assertIn("video_id", s)
                 self.assertIn("question", s)
                 self.assertIn("task_type", s)
@@ -687,12 +690,27 @@ class TestOVOBenchEvaluatorLogic(unittest.TestCase):
             evaluator.lock_tasks = {"OCR", "ATR", "OJR", "STU", "ACR", "FPD"}
             evaluator.fork_tasks = {"EPM", "ASI", "HLD"}
             evaluator.num_frames = 4
+            evaluator.frame_sampling_strategy = "uniform"
+            evaluator.resize_shortest_edge = 224
             evaluator.max_new_tokens = 512
             # Mock _generate_answer to return a deterministic choice
             evaluator._generate_answer = MagicMock(return_value="A")
 
-            samples = evaluator.load_ovo_dataset(self.tmp_dir, split="test")
-            results = evaluator.evaluate(samples, save_predictions=True)
+            import torch as _torch
+            task_types = ["OCR", "ATR", "OJR", "STU", "EPM", "ASI"]
+            dummy_samples = [
+                {
+                    "video_id": f"ovo_{i:03d}",
+                    "question": f"OVO question {i}?",
+                    "options": ["A", "B", "C", "D"],
+                    "answer_idx": i % 4,
+                    "task_type": task_types[i % len(task_types)],
+                    "frames": _torch.zeros(4, 3, 224, 224),
+                    "pure_memory": False,
+                }
+                for i in range(20)
+            ]
+            results = evaluator.evaluate(dummy_samples, save_predictions=True)
 
             self.assertIn("overall_accuracy", results)
             self.assertIn("lock_accuracy", results)
