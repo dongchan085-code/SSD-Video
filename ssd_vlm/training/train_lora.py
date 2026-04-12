@@ -303,6 +303,17 @@ def main():
     config = load_config(args.config)
     logger.info(f"Loaded config from {args.config}")
     
+    # Resolve device from model config
+    device_map = config.get("model", {}).get("device_map", "auto")
+    if device_map == "cpu":
+        device = "cpu"
+    elif torch.cuda.is_available():
+        device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+
     # Create trainer
     trainer = LoRATrainer(
         model_id=config["model"].get("model_id", "Qwen/Qwen3-VL-8B-Instruct"),
@@ -310,6 +321,7 @@ def main():
         lora_config=config["lora"],
         training_config=config["training"],
         model_config=config.get("model"),
+        device=device,
     )
     
     # Load data
