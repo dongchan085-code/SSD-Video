@@ -210,6 +210,14 @@ class LoRATrainer:
         
         logger.info("Training complete!")
         self._save_model(-1, "final")
+
+        # Merge LoRA weights into base model for inference
+        logger.info("Merging LoRA weights into base model...")
+        merged_model = self.model.merge_and_unload()
+        merged_dir = self.output_dir / "merged"
+        merged_model.save_pretrained(str(merged_dir))
+        self.processor.save_pretrained(str(merged_dir))
+        logger.info(f"Merged model saved to {merged_dir}")
     
     @torch.no_grad()
     def _evaluate(self, dataloader: DataLoader) -> float:
@@ -293,6 +301,7 @@ def main():
         num_workers=config["training"].get("dataloader_num_workers", 4),
         shuffle=True,
         max_seq_length=config["data"].get("max_seq_length", 4096),
+        vqa_buffer_ratio=config["data"].get("vqa_buffer_ratio", 0.1),
     )
     
     # Train

@@ -198,33 +198,44 @@ class TestSSDSampleDataset(unittest.TestCase):
         self.jsonl_path = os.path.join(self.tmp_dir, "samples.jsonl")
         write_ssd_samples_jsonl(self.samples, self.jsonl_path)
 
+    def _make_mock_tokenizer(self):
+        """가벼운 mock tokenizer 생성."""
+        import torch
+        mock_tok = MagicMock()
+        def mock_call(text, max_length=4096, truncation=True,
+                      padding="max_length", return_tensors="pt", **kwargs):
+            return {
+                "input_ids": torch.randint(0, 1000, (1, 32)),
+                "attention_mask": torch.ones(1, 32, dtype=torch.long),
+            }
+        mock_tok.side_effect = mock_call
+        return mock_tok
+
     def test_dataset_load(self):
         from ssd_vlm.data.ssd_sample_dataset import SSDSampleDataset
-        ds = SSDSampleDataset(samples_path=self.jsonl_path)
+        ds = SSDSampleDataset(samples_path=self.jsonl_path, tokenizer=self._make_mock_tokenizer())
         self.assertEqual(len(ds), 20)
 
     def test_dataset_getitem(self):
         from ssd_vlm.data.ssd_sample_dataset import SSDSampleDataset
-        ds = SSDSampleDataset(samples_path=self.jsonl_path)
+        ds = SSDSampleDataset(samples_path=self.jsonl_path, tokenizer=self._make_mock_tokenizer())
         item = ds[0]
-        self.assertIn("video_id", item)
-        self.assertIn("question", item)
-        self.assertIn("completion", item)
-        self.assertIn("options", item)
-        self.assertIn("answer_idx", item)
-        self.assertIn("skill_category", item)
+        self.assertIn("input_ids", item)
+        self.assertIn("attention_mask", item)
+        self.assertIn("labels", item)
 
     def test_dataset_all_items_accessible(self):
         from ssd_vlm.data.ssd_sample_dataset import SSDSampleDataset
-        ds = SSDSampleDataset(samples_path=self.jsonl_path)
+        ds = SSDSampleDataset(samples_path=self.jsonl_path, tokenizer=self._make_mock_tokenizer())
         for i in range(len(ds)):
             item = ds[i]
-            self.assertIsInstance(item["completion"], str)
+            self.assertIsNotNone(item["input_ids"])
 
     def test_dataset_missing_file_raises(self):
         from ssd_vlm.data.ssd_sample_dataset import SSDSampleDataset
         with self.assertRaises(FileNotFoundError):
-            SSDSampleDataset(samples_path="/nonexistent/path/samples.jsonl")
+            SSDSampleDataset(samples_path="/nonexistent/path/samples.jsonl",
+                             tokenizer=self._make_mock_tokenizer())
 
     def test_dataset_empty_lines_skipped(self):
         """JSONL에 빈 줄이 있어도 정상 파싱."""
@@ -234,8 +245,18 @@ class TestSSDSampleDataset(unittest.TestCase):
             f.write("\n")  # 빈 줄
             f.write(json.dumps(self.samples[1]) + "\n")
         from ssd_vlm.data.ssd_sample_dataset import SSDSampleDataset
-        ds = SSDSampleDataset(samples_path=path_with_blanks)
+        ds = SSDSampleDataset(samples_path=path_with_blanks,
+                              tokenizer=self._make_mock_tokenizer())
         self.assertEqual(len(ds), 2)
+
+    def test_vqa_buffer_ratio(self):
+        """VQA buffer가 올바르게 적용되는지 검증."""
+        from ssd_vlm.data.ssd_sample_dataset import SSDSampleDataset
+        ds = SSDSampleDataset(samples_path=self.jsonl_path,
+                              tokenizer=self._make_mock_tokenizer(),
+                              vqa_buffer_ratio=0.1)
+        n_vqa = len(ds.vqa_indices)
+        self.assertEqual(n_vqa, 2)  # 20 * 0.1 = 2
 
 
 # ─────────────────────────────────────────────
@@ -255,13 +276,11 @@ class TestSSDSampleDataCollator(unittest.TestCase):
         """가벼운 mock tokenizer 생성."""
         import torch
         mock_tok = MagicMock()
-        # tokenizer(texts, ...) 호출 시 더미 텐서 반환
-        def mock_call(texts, padding=True, truncation=True, max_length=512,
-                      return_tensors="pt", **kwargs):
-            bsz = len(texts)
+        def mock_call(text, max_length=4096, truncation=True,
+                      padding="max_length", return_tensors="pt", **kwargs):
             return {
-                "input_ids": torch.randint(0, 1000, (bsz, 32)),
-                "attention_mask": torch.ones(bsz, 32, dtype=torch.long),
+                "input_ids": torch.randint(0, 1000, (1, 32)),
+                "attention_mask": torch.ones(1, 32, dtype=torch.long),
             }
         mock_tok.side_effect = mock_call
         return mock_tok
@@ -270,9 +289,8 @@ class TestSSDSampleDataCollator(unittest.TestCase):
         import torch
         from ssd_vlm.data.ssd_sample_dataset import SSDSampleDataset, SSDSampleDataCollator
 
-        ds = SSDSampleDataset(samples_path=self.jsonl_path)
-        tokenizer = self._make_mock_tokenizer()
-        collator = SSDSampleDataCollator(tokenizer=tokenizer, max_seq_length=512)
+        ds = SSDSampleDataset(samples_path=self.jsonl_path, tokenizer=self._make_mock_tokenizer())
+        collator = SSDSampleDataCollator()
 
         batch = [ds[i] for i in range(4)]
         result = collator(batch)
@@ -283,19 +301,19 @@ class TestSSDSampleDataCollator(unittest.TestCase):
         self.assertEqual(result["input_ids"].shape[0], 4)
         self.assertEqual(result["labels"].shape[0], 4)
 
-    def test_collator_labels_equal_input_ids(self):
-        """labels는 input_ids의 복사본이어야 함 (언어 모델링)."""
+    def test_collator_labels_masking(self):
+        """labels는 prompt 부분이 -100으로 마스킹되어야 함."""
         import torch
         from ssd_vlm.data.ssd_sample_dataset import SSDSampleDataset, SSDSampleDataCollator
 
-        ds = SSDSampleDataset(samples_path=self.jsonl_path)
-        tokenizer = self._make_mock_tokenizer()
-        collator = SSDSampleDataCollator(tokenizer=tokenizer, max_seq_length=512)
+        ds = SSDSampleDataset(samples_path=self.jsonl_path, tokenizer=self._make_mock_tokenizer())
+        collator = SSDSampleDataCollator()
 
         batch = [ds[i] for i in range(2)]
         result = collator(batch)
 
-        self.assertTrue(torch.equal(result["input_ids"], result["labels"]))
+        # labels에 -100 마스킹이 존재해야 함
+        self.assertTrue((result["labels"] == -100).any())
 
 
 # ─────────────────────────────────────────────
@@ -755,17 +773,16 @@ class TestPipelineDataFlow(unittest.TestCase):
         from ssd_vlm.data.ssd_sample_dataset import SSDSampleDataset, SSDSampleDataCollator
 
         mock_tok = MagicMock()
-        def mock_call(texts, padding=True, truncation=True, max_length=512,
-                      return_tensors="pt", **kwargs):
-            bsz = len(texts)
+        def mock_call(text, max_length=4096, truncation=True,
+                      padding="max_length", return_tensors="pt", **kwargs):
             return {
-                "input_ids": torch.randint(0, 1000, (bsz, 64)),
-                "attention_mask": torch.ones(bsz, 64, dtype=torch.long),
+                "input_ids": torch.randint(0, 1000, (1, 64)),
+                "attention_mask": torch.ones(1, 64, dtype=torch.long),
             }
         mock_tok.side_effect = mock_call
 
-        ds = SSDSampleDataset(samples_path=self.jsonl_path)
-        collator = SSDSampleDataCollator(tokenizer=mock_tok, max_seq_length=512)
+        ds = SSDSampleDataset(samples_path=self.jsonl_path, tokenizer=mock_tok)
+        collator = SSDSampleDataCollator()
         loader = DataLoader(ds, batch_size=4, collate_fn=collator, shuffle=False, num_workers=0)
 
         batch = next(iter(loader))

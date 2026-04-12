@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import (
     AutoProcessor,
-    Qwen2VLForConditionalGeneration,
+    Qwen3VLForConditionalGeneration,
     get_scheduler,
 )
 
@@ -60,7 +60,7 @@ class FullFTTrainer:
         # Load model and processor
         logger.info(f"Loading model from: {model_path}")
         self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-        self.model = Qwen2VLForConditionalGeneration.from_pretrained(
+        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
             model_path,
             torch_dtype=torch.bfloat16,
             device_map="auto",

@@ -2,12 +2,12 @@
 # Evaluates fine-tuned SSD-VLM on OVO-Bench with 4-frame budget
 
 model:
-  model_path: ./outputs/ssd_vlm_final
+  model_path: ./outputs/lora_checkpoint
   dtype: bfloat16
   device_map: auto
   load_in_8bit: false
-  use_lora: false
-  is_merged: true
+  use_lora: true
+  is_merged: false
 
 inference:
   num_frames: 4

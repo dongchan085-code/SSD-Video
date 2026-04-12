@@ -68,6 +68,7 @@ data:
   frame_sampling_strategy: uniform
   resize_shortest_edge: 224
   max_seq_length: 4096
+  vqa_buffer_ratio: 0.1
 
 evaluation:
   eval_strategy: steps

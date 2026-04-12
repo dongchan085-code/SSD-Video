@@ -57,7 +57,7 @@ echo ""
 echo "Step 3: LoRA Fine-tuning (Stage 1)"
 echo "=================================="
 echo "LoRA rank: 128, alpha: 256"
-echo "Learning rate: 5e-4, Epochs: 3"
+echo "Learning rate: 5e-4, Epochs: 2"
 echo ""
 
 if [ -f "${OUTPUT_DIR}/ssd_samples/samples.jsonl" ]; then
@@ -71,25 +71,14 @@ else
     echo "Skipping LoRA training (SSD samples not found)"
 fi
 
-# Step 4: Full-parameter Fine-tuning
+# Step 4: Full-parameter Fine-tuning (SKIPPED - paper uses LoRA only)
+# Stage 2 Full FT is available as an ablation (see run_ablations.sh)
+# but is not part of the main SSD-VLM method described in the paper.
 echo ""
-echo "Step 4: Full-parameter Fine-tuning (Stage 2)"
-echo "==========================================="
-echo "Learning rate: 2e-5, Epochs: 1"
-echo "DeepSpeed ZeRO-3 for memory efficiency"
+echo "Step 4: Skipped (paper method is LoRA-only)"
+echo "============================================"
+echo "Full FT available as ablation via run_ablations.sh"
 echo ""
-
-if [ -d "${OUTPUT_DIR}/lora_checkpoint" ] && [ -f "${OUTPUT_DIR}/ssd_samples/samples.jsonl" ]; then
-    torchrun --nproc_per_node=${NUM_GPUS} \
-        "${PROJECT_DIR}/ssd_vlm/training/train_full_ft.py" \
-        --config "${PROJECT_DIR}/configs/train_full_ft.yaml" \
-        --samples_path "${OUTPUT_DIR}/ssd_samples/samples.jsonl" \
-        --lora_checkpoint "${OUTPUT_DIR}/lora_checkpoint" \
-        --output_dir "${OUTPUT_DIR}/ssd_vlm_final" \
-        || echo "Note: Full FT training requires GPU and LoRA checkpoint"
-else
-    echo "Skipping full FT (LoRA checkpoint not found)"
-fi
 
 # Step 5: OVO-Bench Evaluation
 echo ""
@@ -106,11 +95,11 @@ python "${PROJECT_DIR}/eval/eval_ovo_bench.py" \
     || echo "Note: Base evaluation requires OVO-Bench data"
 
 # Evaluate SSD-VLM
-if [ -d "${OUTPUT_DIR}/ssd_vlm_final" ]; then
+if [ -d "${OUTPUT_DIR}/lora_checkpoint" ]; then
     echo "Evaluating SSD-VLM..."
     python "${PROJECT_DIR}/eval/eval_ovo_bench.py" \
         --config "${PROJECT_DIR}/configs/eval_ovo_ssd.yaml" \
-        --model_path "${OUTPUT_DIR}/ssd_vlm_final" \
+        --model_path "${OUTPUT_DIR}/lora_checkpoint" \
         --data_path "${DATA_DIR}/ovo_bench" \
         --output_file "${RESULTS_DIR}/ovo_ssd.json" \
         || echo "Note: SSD evaluation requires OVO-Bench data"
@@ -125,10 +114,10 @@ echo "================================"
 
 # Frame budget sweep
 echo "Frame budget sweep (4, 8, 16, 32 frames)..."
-if [ -d "${OUTPUT_DIR}/ssd_vlm_final" ]; then
+if [ -d "${OUTPUT_DIR}/lora_checkpoint" ]; then
     python "${PROJECT_DIR}/eval/eval_frame_sweep.py" \
         --config "${PROJECT_DIR}/configs/eval_ovo_frame_sweep.yaml" \
-        --model_path "${OUTPUT_DIR}/ssd_vlm_final" \
+        --model_path "${OUTPUT_DIR}/lora_checkpoint" \
         --data_path "${DATA_DIR}/ovo_bench" \
         --output_dir "${RESULTS_DIR}/frame_sweep" \
         || echo "Note: Frame sweep requires OVO-Bench data"
@@ -188,7 +177,7 @@ echo ""
 echo "Output locations:"
 echo "  Samples: ${OUTPUT_DIR}/ssd_samples/"
 echo "  LoRA checkpoint: ${OUTPUT_DIR}/lora_checkpoint/"
-echo "  Final model: ${OUTPUT_DIR}/ssd_vlm_final/"
+echo "  Final model (LoRA): ${OUTPUT_DIR}/lora_checkpoint/"
 echo "  Results: ${RESULTS_DIR}/"
 echo "  Figures: ${PROJECT_DIR}/figures/outputs/"
 echo ""
