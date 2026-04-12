@@ -146,7 +146,25 @@ bash "${SCRIPT_DIR}/run_ablations.sh" "${DATA_DIR}" "${OUTPUT_DIR}" "${RESULTS_D
 echo ""
 echo "Step 8: Generating Publication Figures"
 echo "======================================"
-echo "Skipping automatic figure generation until real-data plotting paths are configured."
+mkdir -p "${PROJECT_DIR}/figures/outputs"
+
+python "${PROJECT_DIR}/figures/plot_pareto.py" \
+    --comparison "${RESULTS_DIR}/scored_results.json" \
+    --sweep "${RESULTS_DIR}/temperature_sweep/temperature_sweep_results.json" \
+    --output "${PROJECT_DIR}/figures/outputs/pareto_frontier.pdf" \
+    || echo "Note: Pareto plot failed (results may be missing)"
+
+python "${PROJECT_DIR}/figures/plot_entropy.py" \
+    --base_entropy "${RESULTS_DIR}/entropy_base.json" \
+    --ssd_entropy "${RESULTS_DIR}/entropy_ssd.json" \
+    --entropy "${RESULTS_DIR}/entropy_comparison.json" \
+    --output "${PROJECT_DIR}/figures/outputs/entropy_analysis.pdf" \
+    || echo "Note: Entropy plot failed (results may be missing)"
+
+python "${PROJECT_DIR}/figures/plot_ablation_results.py" \
+    --results_dir "${RESULTS_DIR}" \
+    --output_dir "${PROJECT_DIR}/figures/outputs" \
+    || echo "Note: Ablation plot failed (results may be missing)"
 
 # Step 9: Score and summarize
 echo ""
