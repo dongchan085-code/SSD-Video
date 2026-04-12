@@ -7,9 +7,11 @@ Adapted from SimpleStream evaluation protocol.
 import argparse
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+import numpy as np
 import torch
 import yaml
 from tqdm import tqdm
@@ -247,13 +249,18 @@ Answer:"""
         total = 0
         predictions = []
         task_results = {}
-        
+
         logger.info(f"Evaluating {len(samples)} samples")
-        
+
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.empty_cache()
+
         with tqdm(total=len(samples), desc="Evaluating") as pbar:
             for sample in samples:
                 # Generate answer via model inference
                 frames = sample["frames"]
+                t_start = time.perf_counter()
                 answer_text = self._generate_answer(
                     question=sample["question"],
                     options=sample["options"],
@@ -261,6 +268,7 @@ Answer:"""
                     temperature=temperature,
                     top_k=top_k,
                 )
+                latency_ms = (time.perf_counter() - t_start) * 1000.0
                 answer_idx = self._extract_choice(answer_text)
 
                 if answer_idx is None:
@@ -286,6 +294,7 @@ Answer:"""
                     "answer_text": answer_text,
                     "correct": is_correct,
                     "task_type": task_type,
+                    "latency_ms": latency_ms,
                 })
                 
                 pbar.update(1)
@@ -312,6 +321,9 @@ Answer:"""
                         if task in self.fork_tasks)
         fork_accuracy = fork_correct / fork_total if fork_total > 0 else 0.0
         
+        latencies = [p["latency_ms"] for p in predictions]
+        mean_lat = float(np.mean(latencies)) if latencies else 0.0
+
         results = {
             "overall_accuracy": accuracy,
             "num_correct": correct,
@@ -319,6 +331,15 @@ Answer:"""
             "per_task_accuracy": per_task_accuracy,
             "lock_accuracy": lock_accuracy,
             "fork_accuracy": fork_accuracy,
+            "mean_latency_ms": mean_lat,
+            "p50_latency_ms": float(np.percentile(latencies, 50)) if latencies else 0.0,
+            "p95_latency_ms": float(np.percentile(latencies, 95)) if latencies else 0.0,
+            "p99_latency_ms": float(np.percentile(latencies, 99)) if latencies else 0.0,
+            "throughput_samples_per_sec": float(1000.0 / mean_lat) if mean_lat > 0 else 0.0,
+            "peak_gpu_memory_gb": (
+                torch.cuda.max_memory_allocated() / 1e9
+                if torch.cuda.is_available() else None
+            ),
             "predictions": predictions if save_predictions else None,
         }
         
