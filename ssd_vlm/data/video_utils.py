@@ -3,6 +3,7 @@ Shared video loading and frame sampling utilities.
 """
 
 import hashlib
+import json
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -43,10 +44,29 @@ def read_video_frames(
     cache_path = None
     if enable_cache and cache_dir is not None:
         cache_dir.mkdir(parents=True, exist_ok=True)
-        cache_path = cache_dir / f"{_cache_key(video_path)}_frames.npz"
-        if cache_path.exists():
-            cached = np.load(cache_path)
-            return cached["frames"], int(cached["total_frames"])
+        key = _cache_key(video_path)
+        npy_path = cache_dir / f"{key}_frames.npy"
+        meta_path = cache_dir / f"{key}_meta.json"
+        npz_path = cache_dir / f"{key}_frames.npz"
+
+        # Prefer fast npy memmap cache
+        if npy_path.exists() and meta_path.exists():
+            with open(meta_path) as f:
+                meta = json.load(f)
+            frames = np.load(npy_path, mmap_mode="r")
+            return frames, int(meta["total_frames"])
+
+        # Fallback: legacy npz cache (read once, re-save as npy)
+        if npz_path.exists():
+            cached = np.load(npz_path)
+            frames_np = cached["frames"]
+            total = int(cached["total_frames"])
+            np.save(npy_path, frames_np)
+            with open(meta_path, "w") as f:
+                json.dump({"total_frames": total}, f)
+            return frames_np, total
+
+        cache_path = npy_path
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -67,7 +87,12 @@ def read_video_frames(
 
     frames_np = np.asarray(frames)
     if enable_cache and cache_path is not None:
-        np.savez_compressed(cache_path, frames=frames_np, total_frames=total_frames)
+        np.save(cache_path, frames_np)
+        meta_out = cache_path.with_name(
+            cache_path.name.replace("_frames.npy", "_meta.json")
+        )
+        with open(meta_out, "w") as f:
+            json.dump({"total_frames": total_frames}, f)
 
     return frames_np, total_frames
 
