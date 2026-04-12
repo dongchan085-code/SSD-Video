@@ -137,7 +137,52 @@ fi
 
 echo ""
 echo "=========================================="
-echo "Ablation 5: Dynamic Temperature Baseline"
+echo "Ablation 5: Greedy Self-Distillation (τ=0)"
+echo "=========================================="
+echo "Testing: is high-temperature sampling key, or does any self-generated data help?"
+echo ""
+
+python "${PROJECT_DIR}/ssd_vlm/sampling/generate_samples.py" \
+    --config "${ABLATION_CONFIG_DIR}/ablation_greedy_ssd.yaml" \
+    --output_dir "${OUTPUT_DIR}/ablation_greedy_ssd_samples" \
+    --data_path "${DATA_DIR}/perception_test" \
+    || echo "Note: Greedy sampling requires actual data"
+
+if [ -f "${OUTPUT_DIR}/ablation_greedy_ssd_samples/samples.jsonl" ]; then
+    torchrun --nproc_per_node=${NUM_GPUS} \
+        "${PROJECT_DIR}/ssd_vlm/training/train_lora.py" \
+        --config "${ABLATION_CONFIG_DIR}/ablation_greedy_ssd.yaml" \
+        --samples_path "${OUTPUT_DIR}/ablation_greedy_ssd_samples/samples.jsonl" \
+        --output_dir "${OUTPUT_DIR}/ablation_greedy_ssd_checkpoint" \
+        || echo "Note: LoRA training requires GPU"
+
+    if [ -d "${OUTPUT_DIR}/ablation_greedy_ssd_checkpoint/merged" ]; then
+        python "${PROJECT_DIR}/eval/eval_ovo_bench.py" \
+            --config "${PROJECT_DIR}/configs/eval_ovo_ssd.yaml" \
+            --model_path "${OUTPUT_DIR}/ablation_greedy_ssd_checkpoint/merged" \
+            --data_path "${DATA_DIR}/ovo_bench" \
+            --output_file "${RESULTS_DIR}/ablation_greedy_ssd.json" \
+            || echo "Note: Evaluation requires OVO-Bench data"
+    fi
+fi
+
+echo ""
+echo "=========================================="
+echo "Ablation 6: Random LoRA Noise Baseline"
+echo "=========================================="
+echo "Testing: does LoRA regularization alone account for improvements?"
+echo ""
+
+python "${PROJECT_DIR}/eval/eval_ovo_bench.py" \
+    --config "${ABLATION_CONFIG_DIR}/ablation_random_lora.yaml" \
+    --model_path "Qwen/Qwen3-VL-8B-Instruct" \
+    --data_path "${DATA_DIR}/ovo_bench" \
+    --output_file "${RESULTS_DIR}/ablation_random_lora.json" \
+    || echo "Note: Random LoRA evaluation requires OVO-Bench data"
+
+echo ""
+echo "=========================================="
+echo "Ablation 7: Dynamic Temperature Baseline"
 echo "=========================================="
 echo "Testing: can query-level temperature match SSD?"
 echo ""
@@ -151,7 +196,7 @@ python "${PROJECT_DIR}/eval/eval_dynamic_temperature.py" \
 
 echo ""
 echo "=========================================="
-echo "Ablation 6: Entropy Analysis (All Models)"
+echo "Ablation 8: Entropy Analysis (All Models)"
 echo "=========================================="
 echo "Testing: Lock-Fork hypothesis mechanistically"
 echo ""
@@ -176,7 +221,7 @@ fi
 
 echo ""
 echo "=========================================="
-echo "Ablation 7: Statistical Significance Tests"
+echo "Ablation 9: Statistical Significance Tests"
 echo "=========================================="
 echo ""
 

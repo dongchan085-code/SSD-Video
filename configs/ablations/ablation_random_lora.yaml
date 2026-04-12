@@ -1,0 +1,50 @@
+# Ablation: Random LoRA noise baseline
+# Initialize LoRA adapters with random weights (no training), merge, and evaluate.
+# Tests: does LoRA's implicit regularization / noise injection alone
+# account for the improvements, or is SSD training necessary?
+
+model:
+  model_id: Qwen/Qwen3-VL-8B-Instruct
+  dtype: bfloat16
+  device_map: auto
+
+lora:
+  r: 128
+  lora_alpha: 256
+  lora_dropout: 0.0
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - v_proj
+    - o_proj
+    - up_proj
+    - down_proj
+    - gate_proj
+  # Use random initialization WITHOUT training
+  init_lora_weights: true
+  skip_training: true
+
+training:
+  output_dir: ./outputs/ablation_random_lora_checkpoint
+  # No training — just initialize, merge, and evaluate
+  num_train_epochs: 0
+
+evaluation:
+  eval_after_merge: true
+  num_frames: 4
+  frame_sampling_strategy: uniform
+  resize_shortest_edge: 224
+
+inference:
+  max_new_tokens: 512
+  temperature: 1.0
+  top_k: 1
+  do_sample: false
+
+wandb:
+  project: ssd-vlm-ablations
+  name: random-lora-noise
+  notes: "Ablation - random LoRA weights (no training) to isolate regularization effect"
+
+seed: 42
