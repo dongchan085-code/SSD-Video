@@ -97,10 +97,11 @@ class LoRATrainer:
         log_model_info(self.model)
         
         # Setup optimizer and scheduler
-        self.num_epochs = training_config.get("num_train_epochs", 3)
+        self.num_epochs = training_config.get("num_train_epochs", 2)
         self.learning_rate = training_config.get("learning_rate", 5e-4)
         self.warmup_ratio = training_config.get("warmup_ratio", 0.1)
-        
+        self.early_stopping_patience = training_config.get("early_stopping_patience", 3)
+
         self.optimizer = None
         self.scheduler = None
     
@@ -138,7 +139,8 @@ class LoRATrainer:
         
         global_step = 0
         best_loss = float('inf')
-        
+        patience_counter = 0
+
         for epoch in range(self.num_epochs):
             logger.info(f"Epoch {epoch + 1}/{self.num_epochs}")
             
@@ -196,15 +198,22 @@ class LoRATrainer:
                     
                     pbar.update(1)
             
-            # Evaluation
+            # Evaluation + early stopping
             if eval_dataloader is not None:
                 eval_loss = self._evaluate(eval_dataloader)
                 logger.info(f"Epoch {epoch + 1} - Eval Loss: {eval_loss:.4f}")
-                
+
                 if eval_loss < best_loss:
                     best_loss = eval_loss
+                    patience_counter = 0
                     self._save_model(epoch, "best")
-            
+                else:
+                    patience_counter += 1
+                    logger.info(f"No improvement for {patience_counter}/{self.early_stopping_patience} evals")
+                    if patience_counter >= self.early_stopping_patience:
+                        logger.info("Early stopping triggered")
+                        break
+
             # Save epoch checkpoint
             self._save_model(epoch, suffix="")
         

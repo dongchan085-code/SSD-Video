@@ -179,21 +179,23 @@ Answer:"""
         with tqdm(total=len(samples), desc="Analyzing") as pbar:
             for sample in samples:
                 task_type = sample.get("task_type", "unknown")
-                
-                # Generate answer with output_scores (simplified simulation)
-                # In actual implementation, would extract logits from model
-                # For demonstration, generate synthetic entropy values
-                if task_type in self.lock_tasks:
-                    # Lock tasks should have low entropy (sharp distribution)
-                    entropy = np.random.normal(1.5, 0.3)
-                elif task_type in self.fork_tasks:
-                    # Fork tasks typically have higher entropy (flatter distribution)
-                    entropy = np.random.normal(3.5, 0.5)
-                else:
-                    entropy = np.random.normal(2.5, 0.5)
-                
-                entropy = max(entropy, 0.1)  # Ensure positive
-                
+
+                # Forward pass to get logits at answer position
+                prompt = self._format_prompt(sample["question"], sample["options"])
+                messages = [{"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                ]}]
+                text = self.processor.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True)
+                inputs = self.processor(
+                    text=[text], padding=True, return_tensors="pt")
+                inputs = {k: v.to(self.model.device) if torch.is_tensor(v) else v
+                          for k, v in inputs.items()}
+
+                outputs = self.model(**inputs)
+                last_logits = outputs.logits[0, -1, :]  # [vocab_size]
+                entropy = self._compute_entropy(last_logits)
+
                 # Categorize
                 if task_type in self.lock_tasks:
                     entropy_data["lock"].append(entropy)
@@ -201,14 +203,14 @@ Answer:"""
                     entropy_data["fork"].append(entropy)
                 else:
                     entropy_data["unknown"].append(entropy)
-                
+
                 # Store per-sample
                 per_sample_entropy.append({
                     "video_id": sample["video_id"],
                     "task_type": task_type,
                     "entropy": entropy,
                 })
-                
+
                 pbar.update(1)
         
         # Compute statistics

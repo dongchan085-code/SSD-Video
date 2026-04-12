@@ -218,7 +218,7 @@ lora:
   lora_alpha: 256      # Scaling factor (usually 2x rank)
   
 training:
-  num_train_epochs: 3
+  num_train_epochs: 2
   per_device_train_batch_size: 2
   gradient_accumulation_steps: 8  # Effective batch: 16 per GPU
   learning_rate: 5e-4

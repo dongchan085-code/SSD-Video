@@ -650,7 +650,7 @@ class TestOVOBenchEvaluatorLogic(unittest.TestCase):
         """답안 추출 로직 검증."""
         # 모델 로딩 없이 메서드만 테스트
         with patch("transformers.AutoProcessor.from_pretrained"), \
-             patch("transformers.Qwen2VLForConditionalGeneration.from_pretrained"):
+             patch("transformers.Qwen3VLForConditionalGeneration.from_pretrained"):
             from eval.eval_ovo_bench import OVOBenchEvaluator
             evaluator = OVOBenchEvaluator.__new__(OVOBenchEvaluator)
             evaluator.lock_tasks = {"OCR", "ATR", "OJR", "STU", "ACR", "FPD"}
@@ -665,7 +665,7 @@ class TestOVOBenchEvaluatorLogic(unittest.TestCase):
     def test_load_ovo_dataset(self):
         """OVO 데이터셋 로딩 검증."""
         with patch("transformers.AutoProcessor.from_pretrained"), \
-             patch("transformers.Qwen2VLForConditionalGeneration.from_pretrained"):
+             patch("transformers.Qwen3VLForConditionalGeneration.from_pretrained"):
             from eval.eval_ovo_bench import OVOBenchEvaluator
             evaluator = OVOBenchEvaluator.__new__(OVOBenchEvaluator)
             evaluator.lock_tasks = {"OCR", "ATR", "OJR", "STU", "ACR", "FPD"}
@@ -679,13 +679,17 @@ class TestOVOBenchEvaluatorLogic(unittest.TestCase):
                 self.assertIn("task_type", s)
 
     def test_evaluate_logic(self):
-        """evaluate() 메서드의 결과 구조 검증 (랜덤 예측)."""
+        """evaluate() 메서드의 결과 구조 검증."""
         with patch("transformers.AutoProcessor.from_pretrained"), \
-             patch("transformers.Qwen2VLForConditionalGeneration.from_pretrained"):
+             patch("transformers.Qwen3VLForConditionalGeneration.from_pretrained"):
             from eval.eval_ovo_bench import OVOBenchEvaluator
             evaluator = OVOBenchEvaluator.__new__(OVOBenchEvaluator)
             evaluator.lock_tasks = {"OCR", "ATR", "OJR", "STU", "ACR", "FPD"}
             evaluator.fork_tasks = {"EPM", "ASI", "HLD"}
+            evaluator.num_frames = 4
+            evaluator.max_new_tokens = 512
+            # Mock _generate_answer to return a deterministic choice
+            evaluator._generate_answer = MagicMock(return_value="A")
 
             samples = evaluator.load_ovo_dataset(self.tmp_dir, split="test")
             results = evaluator.evaluate(samples, save_predictions=True)
@@ -701,7 +705,7 @@ class TestOVOBenchEvaluatorLogic(unittest.TestCase):
     def test_lock_fork_split(self):
         """Lock / Fork task 분리 로직 검증."""
         with patch("transformers.AutoProcessor.from_pretrained"), \
-             patch("transformers.Qwen2VLForConditionalGeneration.from_pretrained"):
+             patch("transformers.Qwen3VLForConditionalGeneration.from_pretrained"):
             from eval.eval_ovo_bench import OVOBenchEvaluator
             evaluator = OVOBenchEvaluator.__new__(OVOBenchEvaluator)
             evaluator.lock_tasks = {"OCR", "ATR", "OJR", "STU", "ACR", "FPD"}
@@ -722,7 +726,7 @@ class TestSSDSampleGeneratorLogic(unittest.TestCase):
 
     def test_format_prompt(self):
         with patch("transformers.AutoProcessor.from_pretrained"), \
-             patch("transformers.Qwen2VLForConditionalGeneration.from_pretrained"):
+             patch("transformers.Qwen3VLForConditionalGeneration.from_pretrained"):
             from ssd_vlm.sampling.generate_samples import SSDSampleGenerator
             gen = SSDSampleGenerator.__new__(SSDSampleGenerator)
 
@@ -739,7 +743,7 @@ class TestSSDSampleGeneratorLogic(unittest.TestCase):
 
     def test_format_prompt_option_count(self):
         with patch("transformers.AutoProcessor.from_pretrained"), \
-             patch("transformers.Qwen2VLForConditionalGeneration.from_pretrained"):
+             patch("transformers.Qwen3VLForConditionalGeneration.from_pretrained"):
             from ssd_vlm.sampling.generate_samples import SSDSampleGenerator
             gen = SSDSampleGenerator.__new__(SSDSampleGenerator)
 

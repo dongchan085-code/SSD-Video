@@ -6,6 +6,7 @@ Handles video loading, frame sampling, and memory skill oversampling.
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -96,36 +97,63 @@ class PerceptionTestDataset(Dataset):
         
         logger.info(f"Loaded {len(self.samples)} samples from {split} split")
     
+    # Temporal reference patterns for automatic memory-task detection.
+    # Questions with past-tense verbs or temporal markers are classified
+    # as memory-relevant, enabling oversampling without answer-level labels.
+    _TEMPORAL_PATTERNS = re.compile(
+        r'\b(did|was|were|had|before|after|earlier|previously|ago|already'
+        r'|happened|occurred|finished|started|began|ended)\b',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _is_memory_by_temporal_reference(cls, question: str) -> bool:
+        """Detect memory-relevant questions via temporal reference heuristic."""
+        return bool(cls._TEMPORAL_PATTERNS.search(question))
+
     def _build_samples(self) -> List[Dict[str, Any]]:
         """Build sample list with memory skill oversampling."""
         samples = []
-        
+        temporal_oversampled = 0
+
         for video_id, annotation in self.annotations.items():
             # Check if video exists in split
             if video_id not in self.split_data.get("video_ids", []):
                 continue
-            
+
+            # Determine skill category: use annotation if available,
+            # otherwise derive automatically from temporal references
+            # in the question text (paper Section 3).
+            annotated_skill = annotation.get("area", annotation.get("skill", ""))
+            question = annotation.get("question", "")
+            is_memory = (
+                annotated_skill == "memory"
+                or self._is_memory_by_temporal_reference(question)
+            )
+
             sample = {
                 "video_id": video_id,
-                "question": annotation.get("question", ""),
+                "question": question,
                 "options": annotation.get("options", []),
                 "answer_idx": annotation.get("answer_id", annotation.get("answer_idx", 0)),
-                "skill_category": annotation.get("area", annotation.get("skill", "")),
+                "skill_category": "memory" if is_memory else annotated_skill,
                 "task_type": annotation.get("reasoning", annotation.get("task_type", "")),
             }
-            
+
             # Add base sample
             samples.append(sample)
-            
+
             # Apply memory skill oversampling
-            if (annotation.get("area", annotation.get("skill", "")) == "memory" and 
-                self.memory_skill_oversample_ratio > 1.0):
+            if is_memory and self.memory_skill_oversample_ratio > 1.0:
                 num_repeats = int(self.memory_skill_oversample_ratio - 1)
                 for _ in range(num_repeats):
                     samples.append(sample.copy())
-        
+                if annotated_skill != "memory":
+                    temporal_oversampled += 1
+
         logger.info(f"Built {len(samples)} samples with memory oversampling "
-                   f"(ratio: {self.memory_skill_oversample_ratio}x)")
+                    f"(ratio: {self.memory_skill_oversample_ratio}x, "
+                    f"{temporal_oversampled} via temporal heuristic)")
         return samples
     
     def _get_video_frames(self, video_id: str) -> np.ndarray:

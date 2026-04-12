@@ -102,7 +102,7 @@ torchrun --nproc_per_node=8 ssd_vlm/training/train_lora.py \
 - `learning_rate`: 5e-4
 - `batch_size`: 2 (per GPU)
 - `gradient_accumulation_steps`: 8
-- `num_epochs`: 3
+- `num_epochs`: 2
 - `use_deepspeed`: true
 - `deepspeed_config`: deepspeed_zero2.json
 
@@ -261,7 +261,7 @@ ssd-vlm/
 - **Alpha**: 256 (scaling factor)
 - **Target modules**: All linear layers
 - **Learning rate**: 5e-4
-- **Epochs**: 3
+- **Epochs**: 2 (with early stopping)
 - **Batch size**: 2 per GPU (16 with gradient accumulation)
 
 ### Full-parameter Fine-tuning

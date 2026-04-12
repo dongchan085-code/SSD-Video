@@ -285,13 +285,29 @@ Answer:"""
         
         with tqdm(total=len(samples), desc="Evaluating") as pbar:
             for sample in samples:
-                # Generate answer (simplified - actual implementation would load frames)
-                # For now, we'll generate a random answer for demonstration
-                answer_text = f"Option {np.random.choice(['A', 'B', 'C', 'D'])}"
+                # Generate answer via model inference
+                frames = sample.get("frames")
+                if frames is not None:
+                    answer_text = self._generate_answer(
+                        question=sample["question"],
+                        options=sample["options"],
+                        frames=frames,
+                        temperature=temperature,
+                        top_k=top_k,
+                    )
+                else:
+                    # Text-only fallback when video frames are unavailable
+                    answer_text = self._generate_answer(
+                        question=sample["question"],
+                        options=sample["options"],
+                        frames=torch.zeros(self.num_frames, 3, 224, 224),
+                        temperature=temperature,
+                        top_k=top_k,
+                    )
                 answer_idx = self._extract_choice(answer_text)
-                
+
                 if answer_idx is None:
-                    answer_idx = np.random.randint(0, 4)
+                    answer_idx = 0  # default to first option on parse failure
                 
                 is_correct = answer_idx == sample["answer_idx"]
                 correct += int(is_correct)
