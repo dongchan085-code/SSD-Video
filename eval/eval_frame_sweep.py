@@ -41,7 +41,8 @@ class FrameSweepEvaluator:
     
     def sweep(
         self,
-        samples: List[Dict[str, Any]],
+        data_path: str,
+        split: str,
         output_dir: str,
     ) -> Dict[str, Dict[str, Any]]:
         """
@@ -68,6 +69,10 @@ class FrameSweepEvaluator:
             )
             
             # Evaluate
+            samples = evaluator.load_ovo_dataset(
+                data_path=data_path,
+                split=split,
+            )
             result = evaluator.evaluate(
                 samples=samples,
                 temperature=1.0,
@@ -122,17 +127,6 @@ def main():
     config = load_config(args.config)
     logger.info(f"Loaded config from {args.config}")
     
-    # Create base evaluator to load dataset
-    base_evaluator = OVOBenchEvaluator(
-        model_path=args.model_path,
-        dtype=config["model"].get("dtype", "bfloat16"),
-    )
-    
-    samples = base_evaluator.load_ovo_dataset(
-        data_path=args.data_path,
-        split=config["data"].get("split", "test"),
-    )
-    
     # Create sweep evaluator
     sweep_evaluator = FrameSweepEvaluator(
         model_path=args.model_path,
@@ -143,7 +137,8 @@ def main():
     
     # Run sweep
     results = sweep_evaluator.sweep(
-        samples=samples,
+        data_path=args.data_path,
+        split=config["data"].get("split", "test"),
         output_dir=args.output_dir,
     )
 

@@ -200,6 +200,12 @@ Answer:"""
                         "completion_tokens": len(generated_ids),
                         "temperature": self.temperature,
                         "top_k": self.top_k,
+                        "source_data_path": sample.get("source_data_path"),
+                        "source_split": sample.get("source_split"),
+                        "video_relpath": sample.get("video_relpath"),
+                        "frame_indices": sample.get("frame_indices"),
+                        "total_frames": sample.get("total_frames"),
+                        "num_frames": int(sample["frames"].shape[0]),
                     }
                     
                     # Write to file

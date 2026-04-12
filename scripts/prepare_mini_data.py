@@ -269,6 +269,7 @@ def convert_ovo_bench(ovo_dir: str, max_samples: int = 10):
             "options": options,
             "answer_idx": gt,
             "task_type": task,
+            "video_relpath": f"videos/{video_id}.mp4",
         }
         video_ids.append(video_id)
 
@@ -327,6 +328,7 @@ def _create_synthetic_ovo_data(ovo_path: Path, max_samples: int = 10):
             "options": ["Option A", "Option B", "Option C", "Option D"],
             "answer_idx": i % 4,
             "task_type": tasks[i],
+            "video_relpath": f"videos/{video_id}.mp4",
         }
 
     split_data = {"video_ids": video_ids}

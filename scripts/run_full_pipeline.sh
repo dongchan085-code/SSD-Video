@@ -95,11 +95,11 @@ python "${PROJECT_DIR}/eval/eval_ovo_bench.py" \
     || echo "Note: Base evaluation requires OVO-Bench data"
 
 # Evaluate SSD-VLM
-if [ -d "${OUTPUT_DIR}/lora_checkpoint" ]; then
+if [ -d "${OUTPUT_DIR}/lora_checkpoint/merged" ]; then
     echo "Evaluating SSD-VLM..."
     python "${PROJECT_DIR}/eval/eval_ovo_bench.py" \
         --config "${PROJECT_DIR}/configs/eval_ovo_ssd.yaml" \
-        --model_path "${OUTPUT_DIR}/lora_checkpoint" \
+        --model_path "${OUTPUT_DIR}/lora_checkpoint/merged" \
         --data_path "${DATA_DIR}/ovo_bench" \
         --output_file "${RESULTS_DIR}/ovo_ssd.json" \
         || echo "Note: SSD evaluation requires OVO-Bench data"
@@ -114,10 +114,10 @@ echo "================================"
 
 # Frame budget sweep
 echo "Frame budget sweep (4, 8, 16, 32 frames)..."
-if [ -d "${OUTPUT_DIR}/lora_checkpoint" ]; then
+if [ -d "${OUTPUT_DIR}/lora_checkpoint/merged" ]; then
     python "${PROJECT_DIR}/eval/eval_frame_sweep.py" \
         --config "${PROJECT_DIR}/configs/eval_ovo_frame_sweep.yaml" \
-        --model_path "${OUTPUT_DIR}/lora_checkpoint" \
+        --model_path "${OUTPUT_DIR}/lora_checkpoint/merged" \
         --data_path "${DATA_DIR}/ovo_bench" \
         --output_dir "${RESULTS_DIR}/frame_sweep" \
         || echo "Note: Frame sweep requires OVO-Bench data"
@@ -146,14 +146,7 @@ bash "${SCRIPT_DIR}/run_ablations.sh" "${DATA_DIR}" "${OUTPUT_DIR}" "${RESULTS_D
 echo ""
 echo "Step 8: Generating Publication Figures"
 echo "======================================"
-
-python "${PROJECT_DIR}/figures/plot_all.py" \
-    --base_results "${RESULTS_DIR}/ovo_base.json" \
-    --ssd_results "${RESULTS_DIR}/ovo_ssd.json" \
-    --frame_sweep_dir "${RESULTS_DIR}/frame_sweep" \
-    --temperature_sweep_dir "${RESULTS_DIR}/temperature_sweep" \
-    --output_dir "${PROJECT_DIR}/figures/outputs" \
-    --use_mock_data
+echo "Skipping automatic figure generation until real-data plotting paths are configured."
 
 # Step 9: Score and summarize
 echo ""

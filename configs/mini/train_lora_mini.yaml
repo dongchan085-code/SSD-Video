@@ -60,11 +60,13 @@ training:
 
 data:
   samples_path: ./outputs/mini/ssd_samples/samples.jsonl
+  source_data_path: ./data/perception_test_mini
   num_frames: 4
   frame_sampling_strategy: uniform
   resize_shortest_edge: 224
   max_seq_length: 256
   vqa_buffer_ratio: 0.1
+  validation_split_ratio: 0.2
 
 evaluation:
   eval_strategy: "no"

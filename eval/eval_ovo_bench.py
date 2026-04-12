@@ -8,13 +8,14 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
-import numpy as np
 import torch
 import yaml
 from tqdm import tqdm
-from transformers import AutoModelForImageTextToText, AutoProcessor
+
+from ssd_vlm.data.ovo_bench_dataset import FORK_TASKS, LOCK_TASKS, OVOBenchDataset
+from ssd_vlm.model_loading import load_vlm_processor_and_model
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,8 @@ class OVOBenchEvaluator:
         dtype: str = "bfloat16",
         device_map: str = "auto",
         num_frames: int = 4,
+        frame_sampling_strategy: str = "uniform",
+        resize_shortest_edge: int = 224,
         max_new_tokens: int = 512,
         batch_size: int = 16,
     ):
@@ -44,36 +47,27 @@ class OVOBenchEvaluator:
         """
         self.model_path = model_path
         self.num_frames = num_frames
+        self.frame_sampling_strategy = frame_sampling_strategy
+        self.resize_shortest_edge = resize_shortest_edge
         self.max_new_tokens = max_new_tokens
         self.batch_size = batch_size
-        
-        # Setup dtype
-        if dtype == "bfloat16":
-            self.torch_dtype = torch.bfloat16
-        elif dtype == "float16":
-            self.torch_dtype = torch.float16
-        else:
-            self.torch_dtype = torch.float32
-        
-        # Load model and processor
+
         logger.info(f"Loading model from: {model_path}")
-        self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-        self.model = AutoModelForImageTextToText.from_pretrained(
-            model_path,
-            torch_dtype=self.torch_dtype,
+        self.processor, self.model = load_vlm_processor_and_model(
+            model_path=model_path,
+            dtype=dtype,
             device_map=device_map,
-            trust_remote_code=True,
         )
         self.model.eval()
         logger.info("Model loaded successfully")
         
         # Task definitions
         # Temporal Lock tasks: real-time perception (sharp distributions needed)
-        self.lock_tasks = {"OCR", "ATR", "OJR", "STU", "ACR", "FPD"}
+        self.lock_tasks = LOCK_TASKS
         # Temporal Fork tasks: backward tracing / memory (flatter distributions needed)
-        self.fork_tasks = {"EPM", "ASI", "HLD"}
+        self.fork_tasks = FORK_TASKS
     
-    def load_ovo_dataset(self, data_path: str, split: str = "test") -> List[Dict[str, Any]]:
+    def load_ovo_dataset(self, data_path: str, split: str = "test") -> OVOBenchDataset:
         """
         Load OVO-Bench dataset.
         
@@ -84,36 +78,13 @@ class OVOBenchEvaluator:
         Returns:
             List of test samples
         """
-        split_file = Path(data_path) / f"{split}_split.json"
-        annotations_file = Path(data_path) / f"{split}_annotations.json"
-        
-        if not split_file.exists() or not annotations_file.exists():
-            raise FileNotFoundError(f"OVO-Bench data not found in {data_path}")
-        
-        with open(split_file, 'r') as f:
-            split_data = json.load(f)
-        
-        with open(annotations_file, 'r') as f:
-            annotations = json.load(f)
-        
-        # Build samples
-        samples = []
-        for video_id in split_data.get("video_ids", []):
-            if video_id not in annotations:
-                continue
-            
-            annotation = annotations[video_id]
-            sample = {
-                "video_id": video_id,
-                "question": annotation.get("question", ""),
-                "options": annotation.get("options", []),
-                "answer_idx": annotation.get("answer_idx", 0),
-                "task_type": annotation.get("task_type", ""),
-            }
-            samples.append(sample)
-        
-        logger.info(f"Loaded {len(samples)} samples from {split}")
-        return samples
+        return OVOBenchDataset(
+            data_path=data_path,
+            split=split,
+            num_frames=self.num_frames,
+            frame_sampling_strategy=self.frame_sampling_strategy,
+            resize_shortest_edge=self.resize_shortest_edge,
+        )
     
     def _format_prompt(self, question: str, options: List[str]) -> str:
         """Format question and options into prompt."""
@@ -253,7 +224,7 @@ Answer:"""
     
     def evaluate(
         self,
-        samples: List[Dict[str, Any]],
+        samples: Sequence[Dict[str, Any]],
         temperature: float = 1.0,
         top_k: int = 1,
         save_predictions: bool = True,
@@ -282,24 +253,14 @@ Answer:"""
         with tqdm(total=len(samples), desc="Evaluating") as pbar:
             for sample in samples:
                 # Generate answer via model inference
-                frames = sample.get("frames")
-                if frames is not None:
-                    answer_text = self._generate_answer(
-                        question=sample["question"],
-                        options=sample["options"],
-                        frames=frames,
-                        temperature=temperature,
-                        top_k=top_k,
-                    )
-                else:
-                    # Text-only fallback when video frames are unavailable
-                    answer_text = self._generate_answer(
-                        question=sample["question"],
-                        options=sample["options"],
-                        frames=torch.zeros(self.num_frames, 3, 224, 224),
-                        temperature=temperature,
-                        top_k=top_k,
-                    )
+                frames = sample["frames"]
+                answer_text = self._generate_answer(
+                    question=sample["question"],
+                    options=sample["options"],
+                    frames=frames,
+                    temperature=temperature,
+                    top_k=top_k,
+                )
                 answer_idx = self._extract_choice(answer_text)
 
                 if answer_idx is None:
@@ -322,6 +283,7 @@ Answer:"""
                     "options": sample["options"],
                     "ground_truth": sample["answer_idx"],
                     "predicted": answer_idx,
+                    "answer_text": answer_text,
                     "correct": is_correct,
                     "task_type": task_type,
                 })
@@ -405,6 +367,14 @@ def main():
         dtype=config["model"].get("dtype", "bfloat16"),
         device_map=config["model"].get("device_map", "auto"),
         num_frames=config["inference"].get("num_frames", 4),
+        frame_sampling_strategy=config["inference"].get(
+            "frame_sampling_strategy",
+            config["evaluation"].get("frame_sampling_strategy", "uniform"),
+        ),
+        resize_shortest_edge=config["inference"].get(
+            "resize_shortest_edge",
+            config["evaluation"].get("resize_shortest_edge", 224),
+        ),
         max_new_tokens=config["inference"].get("max_new_tokens", 512),
         batch_size=config["data"].get("batch_size", 16),
     )

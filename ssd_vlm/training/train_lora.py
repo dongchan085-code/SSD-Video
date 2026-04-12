@@ -4,9 +4,8 @@ Fine-tune with LoRA adapters (rank 128, alpha 256) on SSD-generated samples.
 """
 
 import argparse
-import json
 import logging
-import os
+import math
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -23,14 +22,10 @@ from transformers import (
 )
 
 from ssd_vlm.data.ssd_sample_dataset import (
-    SSDSampleDataset,
-    SSDSampleDataCollator,
-    create_ssd_sample_dataloader,
+    create_ssd_sample_dataloaders,
 )
 from ssd_vlm.training.utils import (
-    CosineWarmupScheduler,
     log_model_info,
-    log_gradient_stats,
     save_checkpoint,
 )
 
@@ -111,6 +106,7 @@ class LoRATrainer:
         self.learning_rate = training_config.get("learning_rate", 5e-4)
         self.warmup_ratio = training_config.get("warmup_ratio", 0.1)
         self.early_stopping_patience = training_config.get("early_stopping_patience", 3)
+        self.gradient_accumulation_steps = training_config.get("gradient_accumulation_steps", 1)
 
         self.optimizer = None
         self.scheduler = None
@@ -142,12 +138,16 @@ class LoRATrainer:
             train_dataloader: Training dataloader
             eval_dataloader: Optional evaluation dataloader
         """
-        num_training_steps = len(train_dataloader) * self.num_epochs
+        num_training_steps = max(
+            1,
+            math.ceil(len(train_dataloader) / self.gradient_accumulation_steps) * self.num_epochs,
+        )
         self.setup_optimizer(num_training_steps)
         
         self.model.to(self.device)
+        self.optimizer.zero_grad(set_to_none=True)
         
-        global_step = 0
+        optimizer_step = 0
         best_loss = float('inf')
         patience_counter = 0
 
@@ -165,44 +165,43 @@ class LoRATrainer:
                             for k, v in batch.items()}
                     
                     # Forward pass
-                    outputs = self.model(
-                        input_ids=batch["input_ids"],
-                        attention_mask=batch["attention_mask"],
-                        labels=batch["labels"],
-                    )
+                    outputs = self.model(**batch)
                     
                     loss = outputs.loss
                     
                     # Backward pass
-                    loss.backward()
-                    
-                    # Gradient clipping
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(),
-                        self.training_config.get("max_grad_norm", 1.0)
-                    )
-                    
-                    self.optimizer.step()
-                    self.scheduler.step()
-                    self.optimizer.zero_grad()
+                    (loss / self.gradient_accumulation_steps).backward()
                     
                     epoch_loss += loss.item()
-                    global_step += 1
+                    should_step = (
+                        (batch_idx + 1) % self.gradient_accumulation_steps == 0
+                        or (batch_idx + 1) == len(train_dataloader)
+                    )
+
+                    if should_step:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(),
+                            self.training_config.get("max_grad_norm", 1.0)
+                        )
+                        self.optimizer.step()
+                        self.scheduler.step()
+                        self.optimizer.zero_grad(set_to_none=True)
+                        optimizer_step += 1
                     
                     # Logging
-                    if global_step % self.training_config.get("logging_steps", 10) == 0:
+                    if should_step and optimizer_step % self.training_config.get("logging_steps", 10) == 0:
                         avg_loss = epoch_loss / (batch_idx + 1)
                         pbar.set_postfix({"loss": f"{avg_loss:.4f}", "lr": f"{self.scheduler.get_last_lr()[0]:.2e}"})
-                        logger.info(f"Step {global_step}: Loss = {avg_loss:.4f}")
+                        logger.info(f"Step {optimizer_step}: Loss = {avg_loss:.4f}")
                     
                     # Save checkpoint
-                    if global_step % self.training_config.get("save_steps", 100) == 0:
+                    if should_step and optimizer_step % self.training_config.get("save_steps", 100) == 0:
                         save_checkpoint(
                             self.model,
                             self.optimizer,
                             self.scheduler,
                             epoch,
-                            global_step,
+                            optimizer_step,
                             str(self.output_dir / "checkpoints"),
                         )
                     
@@ -234,8 +233,8 @@ class LoRATrainer:
         logger.info("Merging LoRA weights into base model...")
         merged_model = self.model.merge_and_unload()
         merged_dir = self.output_dir / "merged"
-        merged_model.save_pretrained(str(merged_dir))
         self.processor.save_pretrained(str(merged_dir))
+        merged_model.save_pretrained(str(merged_dir))
         logger.info(f"Merged model saved to {merged_dir}")
     
     @torch.no_grad()
@@ -250,11 +249,7 @@ class LoRATrainer:
             batch = {k: v.to(self.device) if torch.is_tensor(v) else v 
                     for k, v in batch.items()}
             
-            outputs = self.model(
-                input_ids=batch["input_ids"],
-                attention_mask=batch["attention_mask"],
-                labels=batch["labels"],
-            )
+            outputs = self.model(**batch)
             
             total_loss += outputs.loss.item()
             num_batches += 1
@@ -326,18 +321,26 @@ def main():
     
     # Load data
     logger.info(f"Loading SSD samples from {args.samples_path}")
-    train_dataloader = create_ssd_sample_dataloader(
+    train_dataloader, eval_dataloader = create_ssd_sample_dataloaders(
         samples_path=args.samples_path,
-        tokenizer=trainer.processor.tokenizer,
+        processor=trainer.processor,
+        source_data_path=config["data"].get("source_data_path"),
         batch_size=config["training"].get("per_device_train_batch_size", 2),
+        eval_batch_size=config["training"].get("per_device_eval_batch_size", 4),
         num_workers=config["training"].get("dataloader_num_workers", 4),
-        shuffle=True,
+        num_frames=config["data"].get("num_frames", 4),
+        frame_sampling_strategy=config["data"].get("frame_sampling_strategy", "uniform"),
+        resize_shortest_edge=config["data"].get("resize_shortest_edge", 224),
         max_seq_length=config["data"].get("max_seq_length", 4096),
         vqa_buffer_ratio=config["data"].get("vqa_buffer_ratio", 0.1),
+        validation_split_ratio=config["data"].get("validation_split_ratio", 0.0),
+        pin_memory=config["training"].get("dataloader_pin_memory", True),
+        drop_last=config["training"].get("dataloader_drop_last", False),
+        seed=config.get("seed", 42),
     )
     
     # Train
-    trainer.train(train_dataloader)
+    trainer.train(train_dataloader, eval_dataloader=eval_dataloader)
 
 
 if __name__ == "__main__":

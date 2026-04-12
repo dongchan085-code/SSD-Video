@@ -8,7 +8,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -16,7 +16,9 @@ import torch.nn.functional as F
 import yaml
 from scipy import stats
 from tqdm import tqdm
-from transformers import AutoModelForImageTextToText, AutoProcessor
+
+from ssd_vlm.data.ovo_bench_dataset import FORK_TASKS, LOCK_TASKS, OVOBenchDataset
+from ssd_vlm.model_loading import load_vlm_processor_and_model
 
 logger = logging.getLogger(__name__)
 
@@ -49,31 +51,20 @@ class EntropyAnalyzer:
         self.max_new_tokens = max_new_tokens
         self.batch_size = batch_size
         
-        # Setup dtype
-        if dtype == "bfloat16":
-            self.torch_dtype = torch.bfloat16
-        elif dtype == "float16":
-            self.torch_dtype = torch.float16
-        else:
-            self.torch_dtype = torch.float32
-        
-        # Load model and processor
         logger.info(f"Loading model from: {model_path}")
-        self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-        self.model = AutoModelForImageTextToText.from_pretrained(
-            model_path,
-            torch_dtype=self.torch_dtype,
+        self.processor, self.model = load_vlm_processor_and_model(
+            model_path=model_path,
+            dtype=dtype,
             device_map=device_map,
-            trust_remote_code=True,
         )
         self.model.eval()
         logger.info("Model loaded successfully")
         
         # Task definitions
-        self.lock_tasks = {"OCR", "ATR", "OJR", "STU", "ACR", "FPD"}
-        self.fork_tasks = {"EPM", "ASI", "HLD"}
+        self.lock_tasks = LOCK_TASKS
+        self.fork_tasks = FORK_TASKS
     
-    def load_ovo_dataset(self, data_path: str, split: str = "test") -> List[Dict[str, Any]]:
+    def load_ovo_dataset(self, data_path: str, split: str = "test") -> OVOBenchDataset:
         """
         Load OVO-Bench dataset.
         
@@ -84,36 +75,11 @@ class EntropyAnalyzer:
         Returns:
             List of test samples
         """
-        split_file = Path(data_path) / f"{split}_split.json"
-        annotations_file = Path(data_path) / f"{split}_annotations.json"
-        
-        if not split_file.exists() or not annotations_file.exists():
-            raise FileNotFoundError(f"OVO-Bench data not found in {data_path}")
-        
-        with open(split_file, 'r') as f:
-            split_data = json.load(f)
-        
-        with open(annotations_file, 'r') as f:
-            annotations = json.load(f)
-        
-        # Build samples
-        samples = []
-        for video_id in split_data.get("video_ids", []):
-            if video_id not in annotations:
-                continue
-            
-            annotation = annotations[video_id]
-            sample = {
-                "video_id": video_id,
-                "question": annotation.get("question", ""),
-                "options": annotation.get("options", []),
-                "answer_idx": annotation.get("answer_idx", 0),
-                "task_type": annotation.get("task_type", ""),
-            }
-            samples.append(sample)
-        
-        logger.info(f"Loaded {len(samples)} samples from {split}")
-        return samples
+        return OVOBenchDataset(
+            data_path=data_path,
+            split=split,
+            num_frames=self.num_frames,
+        )
     
     def _format_prompt(self, question: str, options: List[str]) -> str:
         """Format question and options into prompt."""
@@ -151,7 +117,7 @@ Answer:"""
     @torch.no_grad()
     def analyze_entropy(
         self,
-        samples: List[Dict[str, Any]],
+        samples: Sequence[Dict[str, Any]],
         save_per_sample: bool = True,
         output_file: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -183,6 +149,7 @@ Answer:"""
                 # Forward pass to get logits at answer position
                 prompt = self._format_prompt(sample["question"], sample["options"])
                 messages = [{"role": "user", "content": [
+                    {"type": "image", "image": sample["frames"]},
                     {"type": "text", "text": prompt},
                 ]}]
                 # Unified apply_chat_template (Qwen3-VL API)

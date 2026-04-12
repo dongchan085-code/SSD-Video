@@ -77,10 +77,10 @@ if [ -f "${OUTPUT_DIR}/ssd_samples/samples.jsonl" ]; then
         || echo "Note: LoRA training requires GPU"
     
     # Evaluate LoRA-only model
-    if [ -d "${OUTPUT_DIR}/ablation_lora_only_checkpoint" ]; then
+    if [ -d "${OUTPUT_DIR}/ablation_lora_only_checkpoint/merged" ]; then
         python "${PROJECT_DIR}/eval/eval_ovo_bench.py" \
             --config "${PROJECT_DIR}/configs/eval_ovo_ssd.yaml" \
-            --model_path "${OUTPUT_DIR}/ablation_lora_only_checkpoint" \
+            --model_path "${OUTPUT_DIR}/ablation_lora_only_checkpoint/merged" \
             --data_path "${DATA_DIR}/ovo_bench" \
             --output_file "${RESULTS_DIR}/ablation_lora_only.json" \
             || echo "Note: Evaluation requires OVO-Bench data"
@@ -164,11 +164,11 @@ python "${PROJECT_DIR}/eval/eval_entropy_analysis.py" \
     --output_file "${RESULTS_DIR}/entropy_base.json" \
     || echo "Note: Entropy analysis requires OVO-Bench data"
 
-if [ -f "${OUTPUT_DIR}/ssd_vlm_final/config.json" ]; then
+if [ -d "${OUTPUT_DIR}/lora_checkpoint/merged" ]; then
     echo "SSD-VLM entropy analysis..."
     python "${PROJECT_DIR}/eval/eval_entropy_analysis.py" \
         --config "${PROJECT_DIR}/configs/eval_ovo_ssd.yaml" \
-        --model_path "${OUTPUT_DIR}/ssd_vlm_final" \
+        --model_path "${OUTPUT_DIR}/lora_checkpoint/merged" \
         --data_path "${DATA_DIR}/ovo_bench" \
         --output_file "${RESULTS_DIR}/entropy_ssd.json" \
         || echo "Note: Entropy analysis requires OVO-Bench data"
@@ -196,22 +196,7 @@ echo ""
 # Create figures output directory
 mkdir -p "${PROJECT_DIR}/figures/outputs/ablations"
 
-echo "1. Ablation trade-off and accuracy comparison..."
-python "${PROJECT_DIR}/figures/plot_ablation_results.py" \
-    --output_dir "${PROJECT_DIR}/figures/outputs/ablations" \
-    --use_mock_data
-
-echo ""
-echo "2. Entropy analysis figures..."
-python "${PROJECT_DIR}/figures/plot_entropy_analysis.py" \
-    --output_dir "${PROJECT_DIR}/figures/outputs/ablations" \
-    --use_mock_data
-
-echo ""
-echo "3. Hyperparameter sensitivity figures..."
-python "${PROJECT_DIR}/figures/plot_sensitivity.py" \
-    --output_dir "${PROJECT_DIR}/figures/outputs/ablations" \
-    --use_mock_data
+echo "Skipping automatic ablation figure generation until real-data plotting paths are configured."
 
 echo ""
 echo "==========================================="

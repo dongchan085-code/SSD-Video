@@ -129,15 +129,11 @@ python3 eval/compute_entropy.py \
     --dtype float32 \
     || echo "[WARN] Entropy analysis failed"
 
-# ── Step 6: Figures (mock data) ──────────────────────────────────────
+# ── Step 6: Figures ───────────────────────────────────────────────────
 echo ""
-echo "Step 6: Generating figures (mock data)"
-echo "======================================="
-
-python3 figures/plot_all.py \
-    --use_mock_data \
-    --output_dir ./figures/outputs/mini \
-    || echo "[WARN] Figure generation failed"
+echo "Step 6: Skipping figure generation"
+echo "=================================="
+echo "Real-data plotting is not yet wired into the local validation script."
 
 # ── Summary ──────────────────────────────────────────────────────────
 echo ""
@@ -151,7 +147,6 @@ echo "  ${OUTPUT_DIR}/lora_checkpoint/merged/"
 echo "  ${RESULTS_DIR}/ovo_base.json"
 echo "  ${RESULTS_DIR}/ovo_ssd.json"
 echo "  ${RESULTS_DIR}/entropy_base.json"
-echo "  figures/outputs/mini/"
 echo ""
 
 # Quick verification

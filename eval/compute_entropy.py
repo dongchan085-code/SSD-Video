@@ -14,51 +14,19 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
-from transformers import AutoModelForImageTextToText, AutoProcessor
+
+from ssd_vlm.data.ovo_bench_dataset import FORK_TASKS, LOCK_TASKS, OVOBenchDataset
+from ssd_vlm.model_loading import load_vlm_processor_and_model
 
 logger = logging.getLogger(__name__)
 
-# ── Task taxonomy (shared across evaluation scripts) ────────────────
-LOCK_TASKS = {"OCR", "ATR", "OJR", "STU", "ACR", "FPD"}
-FORK_TASKS = {"EPM", "ASI", "HLD"}
-
 ANSWER_TOKENS = ["A", "B", "C", "D"]
-
-
-# ── Dataset loading (reused from eval_ovo_bench.py) ─────────────────
-
-def load_ovo_dataset(data_path: str, split: str = "test") -> List[Dict[str, Any]]:
-    """Load OVO-Bench annotations."""
-    split_file = Path(data_path) / f"{split}_split.json"
-    annotations_file = Path(data_path) / f"{split}_annotations.json"
-
-    if not split_file.exists() or not annotations_file.exists():
-        raise FileNotFoundError(f"OVO-Bench data not found in {data_path}")
-
-    with open(split_file) as f:
-        split_data = json.load(f)
-    with open(annotations_file) as f:
-        annotations = json.load(f)
-
-    samples = []
-    for video_id in split_data.get("video_ids", []):
-        if video_id not in annotations:
-            continue
-        ann = annotations[video_id]
-        samples.append({
-            "video_id": video_id,
-            "question": ann.get("question", ""),
-            "options": ann.get("options", []),
-            "answer_idx": ann.get("answer_idx", 0),
-            "task_type": ann.get("task_type", ""),
-        })
-    return samples
 
 
 def format_prompt(question: str, options: List[str]) -> str:
@@ -83,17 +51,11 @@ class EntropyComputer:
     ):
         self.num_frames = num_frames
 
-        torch_dtype = {"bfloat16": torch.bfloat16,
-                       "float16": torch.float16}.get(dtype, torch.float32)
-
         logger.info(f"Loading model: {model_path}")
-        self.processor = AutoProcessor.from_pretrained(
-            model_path, trust_remote_code=True)
-        self.model = AutoModelForImageTextToText.from_pretrained(
-            model_path,
-            torch_dtype=torch_dtype,
+        self.processor, self.model = load_vlm_processor_and_model(
+            model_path=model_path,
+            dtype=dtype,
             device_map=device_map,
-            trust_remote_code=True,
         )
         self.model.eval()
 
@@ -156,7 +118,7 @@ class EntropyComputer:
 
     def compute(
         self,
-        samples: List[Dict[str, Any]],
+        samples: Sequence[Dict[str, Any]],
         output_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run entropy analysis over all samples."""
@@ -168,7 +130,10 @@ class EntropyComputer:
 
         for sample in tqdm(samples, desc="Computing entropy"):
             result = self._forward_sample(
-                sample["question"], sample["options"])
+                sample["question"],
+                sample["options"],
+                frames=sample["frames"],
+            )
             entropy = result["entropy"]
             rank = self._rank_of_gt(result["probs"], sample["answer_idx"])
 
@@ -225,7 +190,11 @@ def main():
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
 
-    samples = load_ovo_dataset(args.data_dir, args.split)
+    samples = OVOBenchDataset(
+        data_path=args.data_dir,
+        split=args.split,
+        num_frames=args.num_frames,
+    )
     logger.info(f"Loaded {len(samples)} samples")
 
     computer = EntropyComputer(

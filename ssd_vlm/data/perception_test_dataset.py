@@ -14,7 +14,8 @@ import cv2
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torchvision.transforms import Compose, Normalize, Resize, ToTensor
+
+from ssd_vlm.data.video_utils import load_video_frames, resolve_video_path
 
 logger = logging.getLogger(__name__)
 
@@ -85,16 +86,6 @@ class PerceptionTestDataset(Dataset):
         # Build dataset with oversampling
         self.samples = self._build_samples()
         
-        # Image transforms
-        self.transforms = Compose([
-            Resize((resize_shortest_edge, resize_shortest_edge)),
-            ToTensor(),
-            Normalize(
-                mean=[0.48145466, 0.4578275, 0.40821073],
-                std=[0.26862954, 0.26130258, 0.27577711]
-            )
-        ])
-        
         logger.info(f"Loaded {len(self.samples)} samples from {split} split")
     
     # Temporal reference patterns for automatic memory-task detection.
@@ -156,65 +147,22 @@ class PerceptionTestDataset(Dataset):
                     f"{temporal_oversampled} via temporal heuristic)")
         return samples
     
-    def _get_video_frames(self, video_id: str) -> np.ndarray:
+    def _get_video_frames(self, video_id: str) -> Tuple[torch.Tensor, List[int], int]:
         """
         Load and sample frames from video.
         
         Returns:
-            np.ndarray: [num_frames, H, W, 3]
+            Tuple of preprocessed frame tensor, sampled frame indices, total frame count.
         """
-        video_path = self.data_path / "videos" / f"{video_id}.mp4"
-        
-        if not video_path.exists():
-            raise FileNotFoundError(f"Video not found: {video_path}")
-        
-        # Try to load from cache first
-        cache_path = self.cache_dir / f"{video_id}_frames.npz"
-        if self.enable_cache and cache_path.exists():
-            frames_data = np.load(cache_path)
-            frames = frames_data["frames"]
-            total_frames = frames_data["total_frames"]
-        else:
-            # Load video
-            cap = cv2.VideoCapture(str(video_path))
-            if not cap.isOpened():
-                raise IOError(f"Failed to open video: {video_path}")
-            
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            if total_frames == 0:
-                raise ValueError(f"Video has no frames: {video_path}")
-            
-            # Read all frames
-            all_frames = []
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                all_frames.append(frame)
-            cap.release()
-            
-            frames = np.array(all_frames)
-            
-            # Cache frames
-            if self.enable_cache:
-                np.savez_compressed(
-                    cache_path,
-                    frames=frames,
-                    total_frames=total_frames
-                )
-        
-        # Sample frames
-        if self.frame_sampling_strategy == "uniform":
-            indices = np.linspace(0, len(frames) - 1, self.num_frames, dtype=int)
-        elif self.frame_sampling_strategy == "random":
-            indices = np.random.choice(len(frames), self.num_frames, replace=False)
-            indices = np.sort(indices)
-        else:
-            raise ValueError(f"Unknown sampling strategy: {self.frame_sampling_strategy}")
-        
-        sampled_frames = frames[indices]
-        return sampled_frames
+        video_path = resolve_video_path(self.data_path, video_id)
+        return load_video_frames(
+            video_path=video_path,
+            num_frames=self.num_frames,
+            frame_sampling_strategy=self.frame_sampling_strategy,
+            resize_shortest_edge=self.resize_shortest_edge,
+            cache_dir=self.cache_dir,
+            enable_cache=self.enable_cache,
+        )
     
     def __len__(self) -> int:
         """Return dataset size."""
@@ -237,18 +185,7 @@ class PerceptionTestDataset(Dataset):
         sample = self.samples[idx]
         
         # Load frames
-        frames = self._get_video_frames(sample["video_id"])
-        
-        # Apply transforms to each frame
-        # torchvision transforms expect PIL Images, not numpy arrays
-        from PIL import Image as PILImage
-        processed_frames = []
-        for frame in frames:
-            pil_frame = PILImage.fromarray(frame.astype(np.uint8))
-            frame_tensor = self.transforms(pil_frame)
-            processed_frames.append(frame_tensor)
-        
-        frames_tensor = torch.stack(processed_frames, dim=0)
+        frames_tensor, frame_indices, total_frames = self._get_video_frames(sample["video_id"])
         
         return {
             "frames": frames_tensor,
@@ -258,6 +195,11 @@ class PerceptionTestDataset(Dataset):
             "skill_category": sample["skill_category"],
             "task_type": sample["task_type"],
             "video_id": sample["video_id"],
+            "video_relpath": f"videos/{sample['video_id']}.mp4",
+            "frame_indices": frame_indices,
+            "total_frames": total_frames,
+            "source_split": self.split,
+            "source_data_path": str(self.data_path.resolve()),
         }
 
 

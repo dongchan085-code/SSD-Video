@@ -86,6 +86,15 @@ class ResultsScorer:
                 ),
             },
         }
+
+        comparison["paper_table"] = {
+            "RT_Avg_base": comparison["base"]["lock_accuracy"],
+            "RT_Avg_ssd": comparison["ssd"]["lock_accuracy"],
+            "Mem_Avg_base": comparison["base"]["fork_accuracy"],
+            "Mem_Avg_ssd": comparison["ssd"]["fork_accuracy"],
+            "Delta_RT": comparison["improvement"]["lock_accuracy"],
+            "Delta_Mem": comparison["improvement"]["fork_accuracy"],
+        }
         
         # Per-task comparison
         base_per_task = base_results.get("per_task_accuracy", {})
