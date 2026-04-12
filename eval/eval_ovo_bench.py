@@ -295,6 +295,7 @@ Answer:"""
                     "correct": is_correct,
                     "task_type": task_type,
                     "latency_ms": latency_ms,
+                    "pure_memory": sample.get("pure_memory", False),
                 })
                 
                 pbar.update(1)
@@ -324,6 +325,13 @@ Answer:"""
         latencies = [p["latency_ms"] for p in predictions]
         mean_lat = float(np.mean(latencies)) if latencies else 0.0
 
+        pure_memory_correct = sum(
+            1 for p in predictions if p.get("pure_memory") and p["correct"]
+        )
+        pure_memory_total = sum(
+            1 for p in predictions if p.get("pure_memory")
+        )
+
         results = {
             "overall_accuracy": accuracy,
             "num_correct": correct,
@@ -340,6 +348,11 @@ Answer:"""
                 torch.cuda.max_memory_allocated() / 1e9
                 if torch.cuda.is_available() else None
             ),
+            "pure_memory_accuracy": (
+                pure_memory_correct / pure_memory_total
+                if pure_memory_total > 0 else None
+            ),
+            "pure_memory_n": pure_memory_total,
             "predictions": predictions if save_predictions else None,
         }
         

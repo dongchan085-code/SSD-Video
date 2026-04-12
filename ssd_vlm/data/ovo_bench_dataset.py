@@ -4,6 +4,7 @@ OVO-Bench dataset utilities for real video-backed evaluation.
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -51,18 +52,37 @@ class OVOBenchDataset(Dataset):
         with open(annotations_file, "r") as f:
             annotations = json.load(f)
 
+        self._leakage_suspect_re = re.compile(
+            r'\b(currently|now|visible|present|this scene|in the frame|right now)\b',
+            re.IGNORECASE,
+        )
+        self._pure_memory_re = re.compile(
+            r'\b(before|earlier|previously|past|ago|happened)\b',
+            re.IGNORECASE,
+        )
+
         self.samples = []
         for video_id in split_data.get("video_ids", []):
             if video_id not in annotations:
                 continue
             annotation = annotations[video_id]
+            question = annotation.get("question", "")
+            task_type = annotation.get("task_type", "")
+            is_fork = task_type in FORK_TASKS
+            if is_fork:
+                has_leakage_cue = bool(self._leakage_suspect_re.search(question))
+                has_memory_cue = bool(self._pure_memory_re.search(question))
+                pure_memory = has_memory_cue and not has_leakage_cue
+            else:
+                pure_memory = False
             self.samples.append({
                 "video_id": video_id,
-                "question": annotation.get("question", ""),
+                "question": question,
                 "options": annotation.get("options", []),
                 "answer_idx": annotation.get("answer_idx", 0),
-                "task_type": annotation.get("task_type", ""),
+                "task_type": task_type,
                 "video_relpath": annotation.get("video_relpath", f"videos/{video_id}.mp4"),
+                "pure_memory": pure_memory,
             })
 
         logger.info(f"Loaded {len(self.samples)} OVO-Bench {split} samples from {self.data_path}")
