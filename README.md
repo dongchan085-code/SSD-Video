@@ -19,8 +19,8 @@ This project implements Simple Self-Distillation for vision language models, ena
 ### Evaluation Protocol
 - **OVO-Bench** benchmark with SimpleStream's 4-frame inference budget
 - Per-task performance breakdown showing category-specific improvements
-- Lock tasks: OCR, ATR, OJR, STU
-- Fork tasks: EPM, ASI
+- Lock tasks (real-time perception): OCR, ATR, OJR, STU, ACR, FPD
+- Fork tasks (retrospective memory): EPM, ASI, HLD
 
 ## Setup
 
@@ -98,7 +98,7 @@ torchrun --nproc_per_node=8 ssd_vlm/training/train_lora.py \
 **Config parameters**:
 - `lora_rank`: 128
 - `lora_alpha`: 256
-- `target_modules`: ["q_proj", "v_proj", "o_proj", "up_proj", "down_proj"]
+- `target_modules`: ["q_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"]
 - `learning_rate`: 5e-4
 - `batch_size`: 2 (per GPU)
 - `gradient_accumulation_steps`: 8
@@ -273,18 +273,15 @@ ssd-vlm/
 ### Evaluation
 - **Frame budget**: 4 (primary), also test 8, 16, 32
 - **Task categories**:
-  - Lock: OCR, ATR, OJR, STU (perception-heavy)
-  - Fork: EPM, ASI (reasoning-heavy)
+  - Lock (real-time perception): OCR, ATR, OJR, STU, ACR, FPD
+  - Fork (retrospective memory): EPM, ASI, HLD
 
 ## Expected Results
 
-SSD-VLM typically achieves:
-- **~3-5% improvement** on Lock tasks (OCR-heavy)
-- **~1-2% improvement** on Fork tasks (reasoning-heavy)
-- **Minimal regression** on unseen task categories
-- **Favorable memory-speed tradeoff** vs. larger models
-
-The "green zone" in the perception-memory tradeoff space represents this sweet spot of improved performance with reasonable compute efficiency.
+SSD-VLM targets the **Pareto expansion** region ($\Delta$RT $\geq 0$, $\Delta$Mem $> 0$):
+- **Fork (memory) tasks**: primary improvement target — SSD selectively reshapes distributions at temporally ambiguous positions
+- **Lock (perception) tasks**: accuracy preserved or marginally improved (zero inference overhead from LoRA merge)
+- **Zero additional latency**: merged LoRA adds no parameters at inference time vs. base SimpleStream
 
 ## Troubleshooting
 

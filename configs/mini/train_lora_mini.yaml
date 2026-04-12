@@ -1,5 +1,5 @@
 # Mini LoRA Fine-tuning Configuration
-# For local CPU/MPS validation with Qwen2-VL-2B-Instruct
+# For local CPU/MPS validation with Qwen3-VL-2B-Instruct
 
 model:
   model_id: Qwen/Qwen3-VL-2B-Instruct
