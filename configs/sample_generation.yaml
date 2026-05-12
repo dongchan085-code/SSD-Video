@@ -3,17 +3,20 @@
 
 model:
   model_id: Qwen/Qwen3-VL-8B-Instruct
-  dtype: bfloat16
-  device_map: auto
+  dtype: float16              # T4(Turing) has no bf16 tensor cores
+  device_map: cuda            # single-GPU pin, no silent CPU split
   load_in_8bit: false
-  load_in_4bit: false
+  load_in_4bit: true          # NF4 ~6GB weights, fits 16GB T4 with KV cache headroom
+  attn_implementation: sdpa   # T4 cannot run flash-attention-2
+  max_pixels: 200704          # 256 * 28 * 28 — cap vision tokens
+  min_pixels: 3136            # 4 * 28 * 28
 
 generation:
   temperature: 1.5
   top_k: 10
   top_p: 1.0
   do_sample: true
-  max_new_tokens: 512
+  max_new_tokens: 128
   min_new_tokens: 1
 
 data:
@@ -59,6 +62,6 @@ logging:
   save_logs: true
 
 hardware:
-  cuda_visible_devices: 0,1,2,3,4,5,6,7
+  cuda_visible_devices: 0
   cudnn_deterministic: false
   seed: 42

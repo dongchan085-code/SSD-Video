@@ -3,9 +3,13 @@
 
 model:
   model_path: ./outputs/lora_checkpoint/merged
-  dtype: bfloat16
-  device_map: auto
+  dtype: float16              # T4 has no bf16 tensor cores
+  device_map: cuda
   load_in_8bit: false
+  load_in_4bit: true          # NF4 fits 16GB T4
+  attn_implementation: sdpa   # FA2 unsupported on Turing
+  max_pixels: 200704          # 256 * 28 * 28
+  min_pixels: 3136            # 4 * 28 * 28
   use_lora: false
   is_merged: true
 
@@ -16,7 +20,7 @@ inference:
   fps: 1.0
   frame_sampling_strategy: recent
   resize_shortest_edge: 224
-  max_new_tokens: 512
+  max_new_tokens: 64
   temperature: 1.0
   top_p: 1.0
   top_k: 1
@@ -29,8 +33,8 @@ data:
   anno_path: ./data/ovo_bench/ovo_bench_new.json
   chunked_dir: ./data/ovo_bench/chunked_videos
   split: test
-  batch_size: 16
-  num_workers: 4
+  batch_size: 1
+  num_workers: 2
 
 evaluation:
   metrics:

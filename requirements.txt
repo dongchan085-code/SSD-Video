@@ -14,6 +14,7 @@ opencv-python-headless==4.9.0.80
 pillow==10.2.0
 tqdm==4.67.1
 accelerate>=0.27.2
+bitsandbytes>=0.43.0
 safetensors==0.4.2
 requests==2.31.0
 pandas==2.0.3

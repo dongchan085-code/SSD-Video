@@ -41,6 +41,10 @@ class OVOBenchEvaluator:
         device_map: str = "auto",
         max_memory: Optional[Dict[Any, str]] = None,
         load_in_8bit: bool = False,
+        load_in_4bit: bool = False,
+        attn_implementation: Optional[str] = None,
+        max_pixels: Optional[int] = None,
+        min_pixels: Optional[int] = None,
         num_frames: int = 4,
         frame_sampling_strategy: str = "uniform",
         resize_shortest_edge: int = 224,
@@ -80,6 +84,10 @@ class OVOBenchEvaluator:
             device_map=device_map,
             max_memory=max_memory,
             load_in_8bit=load_in_8bit,
+            load_in_4bit=load_in_4bit,
+            attn_implementation=attn_implementation,
+            max_pixels=max_pixels,
+            min_pixels=min_pixels,
         )
         self.model.eval()
         logger.info("Model loaded successfully")
@@ -159,16 +167,16 @@ Answer:"""
         """
         prompt = format_ovo_prompt(task_type, question, options)
         
-        # Prepare input
+        # Prepare input — pass as a video item so Qwen3-VL temporal-packs the frames.
         if isinstance(frames, list):
-            image_content = [{"type": "image", "image": frame} for frame in frames]
+            video_content = [{"type": "video", "video": frames}]
         else:
-            image_content = [{"type": "image", "image": frames}]
+            video_content = [{"type": "video", "video": [frames]}]
 
         messages = [
             {
                 "role": "user",
-                "content": image_content + [{"type": "text", "text": prompt}],
+                "content": video_content + [{"type": "text", "text": prompt}],
             }
         ]
         
@@ -540,6 +548,10 @@ def main():
         device_map=config["model"].get("device_map", "auto"),
         max_memory=config["model"].get("max_memory"),
         load_in_8bit=config["model"].get("load_in_8bit", False),
+        load_in_4bit=config["model"].get("load_in_4bit", False),
+        attn_implementation=config["model"].get("attn_implementation"),
+        max_pixels=config["model"].get("max_pixels"),
+        min_pixels=config["model"].get("min_pixels"),
         num_frames=config["inference"].get("num_frames", 4),
         frame_sampling_strategy=config["inference"].get(
             "frame_sampling_strategy",

@@ -15,9 +15,9 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import AutoModelForImageTextToText, AutoProcessor
 
 from ssd_vlm.data.perception_test_dataset import PerceptionTestDataset
+from ssd_vlm.model_loading import load_vlm_processor_and_model
 
 logger = logging.getLogger(__name__)
 
@@ -35,20 +35,13 @@ class SSDSampleGenerator:
         top_p: float = 1.0,
         max_new_tokens: int = 512,
         batch_size: int = 32,
+        load_in_8bit: bool = False,
+        load_in_4bit: bool = False,
+        attn_implementation: Optional[str] = None,
+        max_pixels: Optional[int] = None,
+        min_pixels: Optional[int] = None,
     ):
-        """
-        Initialize sample generator.
-        
-        Args:
-            model_id: HuggingFace model ID
-            dtype: Data type (bfloat16, float16, float32)
-            device_map: Device mapping for model
-            temperature: Sampling temperature
-            top_k: Top-k tokens to consider
-            top_p: Top-p (nucleus) sampling
-            max_new_tokens: Maximum tokens to generate
-            batch_size: Batch size for inference
-        """
+        """Initialize sample generator. See `load_vlm_processor_and_model` for quantization args."""
         self.model_id = model_id
         self.dtype = dtype
         self.device_map = device_map
@@ -57,23 +50,17 @@ class SSDSampleGenerator:
         self.top_p = top_p
         self.max_new_tokens = max_new_tokens
         self.batch_size = batch_size
-        
-        # Setup dtype
-        if dtype == "bfloat16":
-            self.torch_dtype = torch.bfloat16
-        elif dtype == "float16":
-            self.torch_dtype = torch.float16
-        else:
-            self.torch_dtype = torch.float32
-        
-        # Load model and processor
+
         logger.info(f"Loading model: {model_id}")
-        self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-        self.model = AutoModelForImageTextToText.from_pretrained(
-            model_id,
-            torch_dtype=self.torch_dtype,
+        self.processor, self.model = load_vlm_processor_and_model(
+            model_path=model_id,
+            dtype=dtype,
             device_map=device_map,
-            trust_remote_code=True,
+            load_in_8bit=load_in_8bit,
+            load_in_4bit=load_in_4bit,
+            attn_implementation=attn_implementation,
+            max_pixels=max_pixels,
+            min_pixels=min_pixels,
         )
         self.model.eval()
         logger.info("Model loaded successfully")
@@ -96,10 +83,11 @@ Answer:"""
         return prompt
 
     @staticmethod
-    def _image_content(frames: Any) -> List[Dict[str, Any]]:
+    def _video_content(frames: Any) -> List[Dict[str, Any]]:
+        # Send all frames as one video item so Qwen3-VL's temporal patching halves vision tokens.
         if isinstance(frames, list):
-            return [{"type": "image", "image": frame} for frame in frames]
-        return [{"type": "image", "image": frames}]
+            return [{"type": "video", "video": frames}]
+        return [{"type": "video", "video": [frames]}]
     
     @torch.no_grad()
     def generate_samples(
@@ -159,7 +147,7 @@ Answer:"""
                 messages = [
                     {
                         "role": "user",
-                        "content": self._image_content(frame_images)
+                        "content": self._video_content(frame_images)
                         + [{"type": "text", "text": prompt}],
                     }
                 ]
@@ -296,6 +284,11 @@ def main():
         model_id=config["model"].get("model_id", "Qwen/Qwen3-VL-8B-Instruct"),
         dtype=config["model"].get("dtype", "bfloat16"),
         device_map=config["model"].get("device_map", "auto"),
+        load_in_8bit=config["model"].get("load_in_8bit", False),
+        load_in_4bit=config["model"].get("load_in_4bit", False),
+        attn_implementation=config["model"].get("attn_implementation"),
+        max_pixels=config["model"].get("max_pixels"),
+        min_pixels=config["model"].get("min_pixels"),
         temperature=config["generation"].get("temperature", 1.5),
         top_k=config["generation"].get("top_k", 10),
         top_p=config["generation"].get("top_p", 1.0),
