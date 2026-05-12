@@ -15,6 +15,35 @@ bash scripts/download_data.sh
 # Creates placeholder data structure - replace with actual datasets
 ```
 
+### 2a. OVO-Bench SimpleStream Subsets on Windows
+
+Use this path before SSD training to verify that the SimpleStream baseline code
+runs on real OVO-Bench videos without downloading the 142GB pre-chunked archive.
+The source-video archive is about 43.16GB, so it fits the 100GB `D:` limit.
+
+```powershell
+# Annotation only; already enough to inspect 1%/10% subset sizes.
+conda run -n env_ssd_simplestream python scripts/download_ovo_sources.py `
+  --data_root D:/ssd_video_data `
+  --skip_parts
+
+# Download the 43.16GB source-video parts once, then prepare the 1% subset.
+.\scripts\prepare_ovo_subset_pipeline.ps1 -Ratio 0.01 -DownloadParts
+
+# Run the baseline on the 1% subset.
+.\scripts\run_simplestream_baseline.ps1 `
+  -DataDir D:\ssd_video_data\ovo_subset_1pct `
+  -Config .\configs\eval_ovo_subset_1pct_base.yaml `
+  -ResultsDir .\results
+
+# If the 1% run is healthy, reuse the downloaded parts for the 10% subset.
+.\scripts\prepare_ovo_subset_pipeline.ps1 -Ratio 0.10
+.\scripts\run_simplestream_baseline.ps1 `
+  -DataDir D:\ssd_video_data\ovo_subset_10pct `
+  -Config .\configs\eval_ovo_subset_10pct_base.yaml `
+  -ResultsDir .\results
+```
+
 ### 3. Generate Figures (with mock data)
 ```bash
 python figures/plot_all.py --use_mock_data --output_dir ./figures/outputs

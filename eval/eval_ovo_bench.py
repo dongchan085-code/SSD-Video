@@ -18,6 +18,15 @@ from tqdm import tqdm
 
 from ssd_vlm.data.ovo_bench_dataset import FORK_TASKS, LOCK_TASKS, OVOBenchDataset
 from ssd_vlm.model_loading import load_vlm_processor_and_model
+from ssd_vlm.simplestream import (
+    BACKWARD_TASK_SET,
+    FORWARD_TASK_SET,
+    REAL_TIME_TASK_SET,
+    aggregate_group_accuracy,
+    format_ovo_prompt,
+    prediction_to_simplestream_record,
+    score_prediction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +39,17 @@ class OVOBenchEvaluator:
         model_path: str,
         dtype: str = "bfloat16",
         device_map: str = "auto",
+        max_memory: Optional[Dict[Any, str]] = None,
+        load_in_8bit: bool = False,
         num_frames: int = 4,
         frame_sampling_strategy: str = "uniform",
         resize_shortest_edge: int = 224,
         max_new_tokens: int = 512,
         batch_size: int = 16,
+        recent_frames_only: Optional[int] = None,
+        chunk_duration: float = 1.0,
+        fps: float = 1.0,
+        use_cache: bool = True,
     ):
         """
         Initialize OVO-Bench evaluator.
@@ -53,12 +68,18 @@ class OVOBenchEvaluator:
         self.resize_shortest_edge = resize_shortest_edge
         self.max_new_tokens = max_new_tokens
         self.batch_size = batch_size
+        self.recent_frames_only = recent_frames_only or num_frames
+        self.chunk_duration = chunk_duration
+        self.fps = fps
+        self.use_cache = use_cache
 
         logger.info(f"Loading model from: {model_path}")
         self.processor, self.model = load_vlm_processor_and_model(
             model_path=model_path,
             dtype=dtype,
             device_map=device_map,
+            max_memory=max_memory,
+            load_in_8bit=load_in_8bit,
         )
         self.model.eval()
         logger.info("Model loaded successfully")
@@ -69,7 +90,13 @@ class OVOBenchEvaluator:
         # Temporal Fork tasks: backward tracing / memory (flatter distributions needed)
         self.fork_tasks = FORK_TASKS
     
-    def load_ovo_dataset(self, data_path: str, split: str = "test") -> OVOBenchDataset:
+    def load_ovo_dataset(
+        self,
+        data_path: str,
+        split: str = "test",
+        anno_path: Optional[str] = None,
+        chunked_dir: Optional[str] = None,
+    ) -> OVOBenchDataset:
         """
         Load OVO-Bench dataset.
         
@@ -86,29 +113,36 @@ class OVOBenchEvaluator:
             num_frames=self.num_frames,
             frame_sampling_strategy=self.frame_sampling_strategy,
             resize_shortest_edge=self.resize_shortest_edge,
+            anno_path=anno_path,
+            chunked_dir=chunked_dir,
+            recent_frames_only=self.recent_frames_only,
+            chunk_duration=self.chunk_duration,
+            fps=self.fps,
         )
     
     def _format_prompt(self, question: str, options: List[str]) -> str:
-        """Format question and options into prompt."""
+        """Backward-compatible default for tests that call this method directly."""
         options_text = "\n".join(
             f"{chr(65 + i)}: {opt}" for i, opt in enumerate(options)
         )
-        prompt = f"""Question: {question}
+        return f"""Question: {question}
 
 Options:
 {options_text}
 
 Answer:"""
-        return prompt
     
     @torch.no_grad()
     def _generate_answer(
         self,
         question: str,
         options: List[str],
-        frames: torch.Tensor,
+        frames: Any,
+        task_type: str = "",
         temperature: float = 1.0,
         top_k: int = 1,
+        top_p: float = 1.0,
+        do_sample: bool = False,
     ) -> str:
         """
         Generate answer for a single sample.
@@ -123,22 +157,18 @@ Answer:"""
         Returns:
             Generated text
         """
-        prompt = self._format_prompt(question, options)
+        prompt = format_ovo_prompt(task_type, question, options)
         
         # Prepare input
+        if isinstance(frames, list):
+            image_content = [{"type": "image", "image": frame} for frame in frames]
+        else:
+            image_content = [{"type": "image", "image": frames}]
+
         messages = [
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "image": frames,
-                    },
-                    {
-                        "type": "text",
-                        "text": prompt,
-                    }
-                ]
+                "content": image_content + [{"type": "text", "text": prompt}],
             }
         ]
         
@@ -162,8 +192,9 @@ Answer:"""
             max_new_tokens=self.max_new_tokens,
             temperature=temperature,
             top_k=top_k,
-            do_sample=(temperature > 0),
-            use_cache=True,
+            top_p=top_p,
+            do_sample=do_sample,
+            use_cache=self.use_cache,
         )
         
         # Decode
@@ -229,8 +260,12 @@ Answer:"""
         samples: Sequence[Dict[str, Any]],
         temperature: float = 1.0,
         top_k: int = 1,
+        top_p: float = 1.0,
+        do_sample: bool = False,
         save_predictions: bool = True,
         output_file: Optional[str] = None,
+        partial_predictions_file: Optional[str] = None,
+        resume_partial: bool = True,
     ) -> Dict[str, Any]:
         """
         Evaluate model on OVO-Bench.
@@ -245,60 +280,94 @@ Answer:"""
         Returns:
             Results dictionary with metrics
         """
-        correct = 0
-        total = 0
         predictions = []
-        task_results = {}
+        completed_ids = set()
+        partial_path = Path(partial_predictions_file) if partial_predictions_file else None
+        if partial_path and resume_partial and partial_path.exists():
+            with open(partial_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    prediction = json.loads(line)
+                    predictions.append(prediction)
+                    completed_ids.add(prediction["video_id"])
+            logger.info("Loaded %d partial predictions from %s", len(predictions), partial_path)
 
-        logger.info(f"Evaluating {len(samples)} samples")
+        pending_samples = [
+            sample for sample in samples
+            if sample.get("video_id") not in completed_ids
+        ]
+
+        logger.info(f"Evaluating {len(pending_samples)} pending samples out of {len(samples)}")
 
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
             torch.cuda.empty_cache()
 
-        with tqdm(total=len(samples), desc="Evaluating") as pbar:
-            for sample in samples:
-                # Generate answer via model inference
-                frames = sample["frames"]
-                t_start = time.perf_counter()
-                answer_text = self._generate_answer(
-                    question=sample["question"],
-                    options=sample["options"],
-                    frames=frames,
-                    temperature=temperature,
-                    top_k=top_k,
-                )
-                latency_ms = (time.perf_counter() - t_start) * 1000.0
-                answer_idx = self._extract_choice(answer_text)
+        partial_handle = None
+        if partial_path:
+            partial_path.parent.mkdir(parents=True, exist_ok=True)
+            partial_handle = open(partial_path, "a", encoding="utf-8")
 
-                if answer_idx is None:
-                    answer_idx = 0  # default to first option on parse failure
-                
-                is_correct = answer_idx == sample["answer_idx"]
-                correct += int(is_correct)
-                total += 1
-                
-                task_type = sample.get("task_type", "unknown")
-                if task_type not in task_results:
-                    task_results[task_type] = {"correct": 0, "total": 0}
-                task_results[task_type]["correct"] += int(is_correct)
-                task_results[task_type]["total"] += 1
-                
-                # Store prediction
-                predictions.append({
-                    "video_id": sample["video_id"],
-                    "question": sample["question"],
-                    "options": sample["options"],
-                    "ground_truth": sample["answer_idx"],
-                    "predicted": answer_idx,
-                    "answer_text": answer_text,
-                    "correct": is_correct,
-                    "task_type": task_type,
-                    "latency_ms": latency_ms,
-                    "pure_memory": sample.get("pure_memory", False),
-                })
-                
-                pbar.update(1)
+        try:
+            with tqdm(total=len(pending_samples), desc="Evaluating") as pbar:
+                for sample in pending_samples:
+                    # Generate answer via model inference
+                    frames = sample.get("frame_images", sample["frames"])
+                    t_start = time.perf_counter()
+                    answer_text = self._generate_answer(
+                        question=sample["question"],
+                        options=sample["options"],
+                        frames=frames,
+                        task_type=sample.get("task_type", ""),
+                        temperature=temperature,
+                        top_k=top_k,
+                        top_p=top_p,
+                        do_sample=do_sample,
+                    )
+                    latency_ms = (time.perf_counter() - t_start) * 1000.0
+
+                    task_type = sample.get("task_type", "unknown")
+                    scored = score_prediction(task_type, answer_text, sample["answer_idx"])
+                    answer_idx = scored["predicted"]
+                    is_correct = bool(scored["correct"])
+
+                    prediction = {
+                        "video_id": sample["video_id"],
+                        "source_id": sample.get("source_id", sample["video_id"]),
+                        "question": sample["question"],
+                        "options": sample["options"],
+                        "ground_truth": scored["ground_truth"],
+                        "predicted": answer_idx,
+                        "answer_text": answer_text,
+                        "correct": is_correct,
+                        "task_type": task_type,
+                        "ovo_split": sample.get("ovo_split"),
+                        "latency_ms": latency_ms,
+                        "pure_memory": sample.get("pure_memory", False),
+                        "frame_indices": sample.get("frame_indices"),
+                        "frame_timestamps": sample.get("frame_timestamps"),
+                        "chunk_ids": sample.get("chunk_ids"),
+                    }
+                    predictions.append(prediction)
+                    if partial_handle:
+                        partial_handle.write(json.dumps(prediction, ensure_ascii=False) + "\n")
+                        partial_handle.flush()
+                    
+                    pbar.update(1)
+        finally:
+            if partial_handle:
+                partial_handle.close()
+
+        correct = sum(1 for prediction in predictions if prediction["correct"])
+        total = len(predictions)
+        task_results = {}
+        for prediction in predictions:
+            task_type = prediction.get("task_type", "unknown")
+            if task_type not in task_results:
+                task_results[task_type] = {"correct": 0, "total": 0}
+            task_results[task_type]["correct"] += int(bool(prediction["correct"]))
+            task_results[task_type]["total"] += 1
         
         # Compute metrics
         accuracy = correct / total if total > 0 else 0.0
@@ -321,6 +390,24 @@ Answer:"""
         fork_total = sum(results["total"] for task, results in task_results.items() 
                         if task in self.fork_tasks)
         fork_accuracy = fork_correct / fork_total if fork_total > 0 else 0.0
+
+        realtime_correct = sum(results["correct"] for task, results in task_results.items()
+                               if task in REAL_TIME_TASK_SET)
+        realtime_total = sum(results["total"] for task, results in task_results.items()
+                             if task in REAL_TIME_TASK_SET)
+        realtime_accuracy = realtime_correct / realtime_total if realtime_total > 0 else 0.0
+
+        backward_correct = sum(results["correct"] for task, results in task_results.items()
+                               if task in BACKWARD_TASK_SET)
+        backward_total = sum(results["total"] for task, results in task_results.items()
+                             if task in BACKWARD_TASK_SET)
+        backward_accuracy = backward_correct / backward_total if backward_total > 0 else 0.0
+
+        forward_correct = sum(results["correct"] for task, results in task_results.items()
+                              if task in FORWARD_TASK_SET)
+        forward_total = sum(results["total"] for task, results in task_results.items()
+                            if task in FORWARD_TASK_SET)
+        forward_accuracy = forward_correct / forward_total if forward_total > 0 else None
         
         latencies = [p["latency_ms"] for p in predictions]
         mean_lat = float(np.mean(latencies)) if latencies else 0.0
@@ -332,6 +419,36 @@ Answer:"""
             1 for p in predictions if p.get("pure_memory")
         )
 
+        simple_predictions = {
+            "backward": [
+                prediction_to_simplestream_record(p)
+                for p in predictions if p.get("ovo_split") == "backward"
+            ],
+            "realtime": [
+                prediction_to_simplestream_record(p)
+                for p in predictions if p.get("ovo_split") == "realtime"
+            ],
+            "forward": [
+                prediction_to_simplestream_record(p)
+                for p in predictions if p.get("ovo_split") == "forward"
+            ],
+        }
+        rt_bwd_values = [
+            value for value in [
+                aggregate_group_accuracy(predictions, "realtime"),
+                aggregate_group_accuracy(predictions, "backward"),
+            ]
+            if value is not None
+        ]
+        three_way_values = [
+            value for value in [
+                aggregate_group_accuracy(predictions, "realtime"),
+                aggregate_group_accuracy(predictions, "backward"),
+                aggregate_group_accuracy(predictions, "forward"),
+            ]
+            if value is not None
+        ]
+
         results = {
             "overall_accuracy": accuracy,
             "num_correct": correct,
@@ -339,6 +456,12 @@ Answer:"""
             "per_task_accuracy": per_task_accuracy,
             "lock_accuracy": lock_accuracy,
             "fork_accuracy": fork_accuracy,
+            "realtime_accuracy": realtime_accuracy,
+            "backward_accuracy": backward_accuracy,
+            "forward_accuracy": forward_accuracy,
+            "rt_bwd_avg": float(np.mean(rt_bwd_values)) if rt_bwd_values else accuracy,
+            "ovo_total_avg_3way": float(np.mean(three_way_values)) if three_way_values else accuracy,
+            "ovo_avg": float(np.mean(rt_bwd_values)) if rt_bwd_values else accuracy,
             "mean_latency_ms": mean_lat,
             "p50_latency_ms": float(np.percentile(latencies, 50)) if latencies else 0.0,
             "p95_latency_ms": float(np.percentile(latencies, 95)) if latencies else 0.0,
@@ -353,6 +476,19 @@ Answer:"""
                 if pure_memory_total > 0 else None
             ),
             "pure_memory_n": pure_memory_total,
+            "decoding": {
+                "temperature": temperature,
+                "top_k": top_k,
+                "top_p": top_p,
+                "do_sample": do_sample,
+                "use_cache": self.use_cache,
+            },
+            "streaming": {
+                "recent_frames_only": self.recent_frames_only,
+                "chunk_duration": self.chunk_duration,
+                "fps": self.fps,
+            },
+            "simplestream": simple_predictions,
             "predictions": predictions if save_predictions else None,
         }
         
@@ -382,6 +518,8 @@ def main():
                        help="Path to OVO-Bench data")
     parser.add_argument("--output_file", type=str, default="./results/ovo_results.json",
                        help="Output file for results")
+    parser.add_argument("--max_samples", type=int, default=None,
+                       help="Optional smoke-test limit after dataset loading")
     
     args = parser.parse_args()
     
@@ -400,6 +538,8 @@ def main():
         model_path=args.model_path,
         dtype=config["model"].get("dtype", "bfloat16"),
         device_map=config["model"].get("device_map", "auto"),
+        max_memory=config["model"].get("max_memory"),
+        load_in_8bit=config["model"].get("load_in_8bit", False),
         num_frames=config["inference"].get("num_frames", 4),
         frame_sampling_strategy=config["inference"].get(
             "frame_sampling_strategy",
@@ -411,21 +551,41 @@ def main():
         ),
         max_new_tokens=config["inference"].get("max_new_tokens", 512),
         batch_size=config["data"].get("batch_size", 16),
+        recent_frames_only=config["inference"].get(
+            "recent_frames_only",
+            config["inference"].get("num_frames", 4),
+        ),
+        chunk_duration=config["inference"].get("chunk_duration", 1.0),
+        fps=config["inference"].get("fps", 1.0),
+        use_cache=config["inference"].get("use_cache", True),
     )
     
     # Load dataset
     samples = evaluator.load_ovo_dataset(
         data_path=args.data_path,
         split=config["data"].get("split", "test"),
+        anno_path=config["data"].get("anno_path"),
+        chunked_dir=config["data"].get("chunked_dir"),
     )
+    max_samples = args.max_samples or config["evaluation"].get("max_samples")
+    if max_samples:
+        samples = [samples[i] for i in range(min(int(max_samples), len(samples)))]
+        logger.info("Using max_samples=%d", len(samples))
     
     # Evaluate
     results = evaluator.evaluate(
         samples=samples,
         temperature=config["inference"].get("temperature", 1.0),
         top_k=config["inference"].get("top_k", 1),
+        top_p=config["inference"].get("top_p", 1.0),
+        do_sample=config["inference"].get("do_sample", False),
         save_predictions=config["evaluation"].get("save_predictions", True),
         output_file=args.output_file,
+        partial_predictions_file=config["evaluation"].get(
+            "partial_predictions_file",
+            str(Path(args.output_file).with_suffix(".partial_predictions.jsonl")),
+        ),
+        resume_partial=config["evaluation"].get("resume_partial", True),
     )
     
     # Print summary

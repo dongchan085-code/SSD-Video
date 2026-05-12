@@ -36,10 +36,33 @@ def read_video_frames(
     video_path: Path,
     cache_dir: Optional[Path] = None,
     enable_cache: bool = True,
+    frame_indices: Optional[List[int]] = None,
 ) -> Tuple[np.ndarray, int]:
     """Read all RGB frames from a video, optionally using a compressed cache."""
     if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise IOError(f"Failed to open video: {video_path}")
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total_frames == 0:
+        cap.release()
+        raise ValueError(f"Video has no frames: {video_path}")
+
+    if frame_indices is not None:
+        frames = []
+        for idx in frame_indices:
+            safe_idx = min(max(int(idx), 0), total_frames - 1)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, safe_idx)
+            ret, frame = cap.read()
+            if not ret:
+                cap.release()
+                raise ValueError(f"Failed to read frame {safe_idx} from {video_path}")
+            frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        cap.release()
+        return np.asarray(frames), total_frames
 
     cache_path = None
     if enable_cache and cache_dir is not None:
@@ -68,15 +91,6 @@ def read_video_frames(
 
         cache_path = npy_path
 
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        raise IOError(f"Failed to open video: {video_path}")
-
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if total_frames == 0:
-        cap.release()
-        raise ValueError(f"Video has no frames: {video_path}")
-
     frames = []
     while True:
         ret, frame = cap.read()
@@ -95,6 +109,21 @@ def read_video_frames(
             json.dump({"total_frames": total_frames}, f)
 
     return frames_np, total_frames
+
+
+def read_video_metadata(video_path: Path) -> Tuple[int, float]:
+    """Read frame count and native FPS without decoding video frames."""
+    if not video_path.exists():
+        raise FileNotFoundError(f"Video not found: {video_path}")
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise IOError(f"Failed to open video: {video_path}")
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    source_fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    cap.release()
+    if total_frames <= 0:
+        raise ValueError(f"Video has no frames: {video_path}")
+    return total_frames, source_fps
 
 
 def sample_frame_indices(
@@ -117,6 +146,101 @@ def sample_frame_indices(
     raise ValueError(f"Unknown sampling strategy: {strategy}")
 
 
+def sample_recent_window_indices(
+    total_frames: int,
+    recent_frames_only: int,
+    fps: float = 1.0,
+    source_fps: Optional[float] = None,
+) -> np.ndarray:
+    """Sample the last N observed frames, matching SimpleStream's recency window."""
+    if total_frames <= 0:
+        raise ValueError("total_frames must be positive")
+    if recent_frames_only <= 0:
+        raise ValueError("recent_frames_only must be positive")
+
+    # If native FPS is known, first emulate observing at the requested streaming FPS,
+    # then keep only the most recent N observed frames.
+    if source_fps and source_fps > 0 and fps and fps > 0:
+        stride = max(1, int(round(source_fps / fps)))
+        observed = np.arange(0, total_frames, stride, dtype=int)
+        if observed.size == 0:
+            observed = np.asarray([total_frames - 1], dtype=int)
+        return observed[-recent_frames_only:]
+
+    start = max(0, total_frames - recent_frames_only)
+    return np.arange(start, total_frames, dtype=int)
+
+
+def _resize_pil_shortest_edge(image: PILImage.Image, shortest_edge: Optional[int]) -> PILImage.Image:
+    if not shortest_edge:
+        return image
+    width, height = image.size
+    if min(width, height) == shortest_edge:
+        return image
+    scale = shortest_edge / float(min(width, height))
+    new_size = (max(1, int(round(width * scale))), max(1, int(round(height * scale))))
+    return image.resize(new_size, PILImage.BICUBIC)
+
+
+def load_video_frame_images(
+    video_path: Path,
+    num_frames: int,
+    frame_sampling_strategy: str = "uniform",
+    resize_shortest_edge: Optional[int] = None,
+    cache_dir: Optional[Path] = None,
+    enable_cache: bool = True,
+    frame_indices: Optional[List[int]] = None,
+    recent_frames_only: Optional[int] = None,
+    chunk_duration: float = 1.0,
+    fps: float = 1.0,
+) -> Tuple[List[PILImage.Image], List[int], int, List[float], List[int]]:
+    """
+    Load raw RGB PIL frames for Qwen-VL processor input.
+
+    The default path preserves the old uniform sampler. Setting
+    frame_sampling_strategy="recent" or recent_frames_only uses a SimpleStream-style
+    recent window: observe frames at the requested streaming FPS, keep the last N.
+    """
+    total_frames, source_fps = read_video_metadata(video_path)
+
+    if frame_indices:
+        indices = np.asarray(
+            [min(max(int(idx), 0), total_frames - 1) for idx in frame_indices],
+            dtype=int,
+        )
+    elif frame_sampling_strategy in {"recent", "recent_window", "simplestream"} or recent_frames_only:
+        indices = sample_recent_window_indices(
+            total_frames=total_frames,
+            recent_frames_only=int(recent_frames_only or num_frames),
+            fps=fps,
+            source_fps=source_fps,
+        )
+    else:
+        indices = sample_frame_indices(
+            total_frames=total_frames,
+            num_frames=num_frames,
+            strategy=frame_sampling_strategy,
+        )
+
+    frames, total_frames = read_video_frames(
+        video_path=video_path,
+        cache_dir=cache_dir,
+        enable_cache=enable_cache,
+        frame_indices=indices.tolist(),
+    )
+
+    pil_frames: List[PILImage.Image] = []
+    for frame in frames:
+        image = PILImage.fromarray(frame.astype(np.uint8))
+        pil_frames.append(_resize_pil_shortest_edge(image, resize_shortest_edge))
+
+    timestamp_fps = source_fps if source_fps and source_fps > 0 else (fps if fps and fps > 0 else 1.0)
+    timestamps = [float(idx) / timestamp_fps for idx in indices.tolist()]
+    chunk = max(float(chunk_duration), 1e-6)
+    chunk_ids = [int(ts // chunk) for ts in timestamps]
+    return pil_frames, indices.tolist(), total_frames, timestamps, chunk_ids
+
+
 def load_video_frames(
     video_path: Path,
     num_frames: int,
@@ -129,28 +253,19 @@ def load_video_frames(
     """
     Load, sample, and preprocess frames from a video.
     """
-    frames, total_frames = read_video_frames(
+    frame_images, indices, total_frames, _, _ = load_video_frame_images(
         video_path=video_path,
+        num_frames=num_frames,
+        frame_sampling_strategy=frame_sampling_strategy,
+        resize_shortest_edge=None,
         cache_dir=cache_dir,
         enable_cache=enable_cache,
+        frame_indices=frame_indices,
     )
-    if frame_indices:
-        indices = np.asarray(
-            [min(max(int(idx), 0), len(frames) - 1) for idx in frame_indices],
-            dtype=int,
-        )
-    else:
-        indices = sample_frame_indices(
-            total_frames=len(frames),
-            num_frames=num_frames,
-            strategy=frame_sampling_strategy,
-        )
     transform = build_frame_transform(resize_shortest_edge)
-    sampled_frames = []
-    for frame in frames[indices]:
-        sampled_frames.append(transform(PILImage.fromarray(frame.astype(np.uint8))))
+    sampled_frames = [transform(frame) for frame in frame_images]
 
-    return torch.stack(sampled_frames, dim=0), indices.tolist(), total_frames
+    return torch.stack(sampled_frames, dim=0), indices, total_frames
 
 
 def resolve_video_path(data_path: Path, video_id: str, video_relpath: Optional[str] = None) -> Path:
@@ -158,6 +273,7 @@ def resolve_video_path(data_path: Path, video_id: str, video_relpath: Optional[s
     candidates = []
     if video_relpath:
         candidates.append(data_path / video_relpath)
+    candidates.append(data_path / "chunked_videos" / f"{video_id}.mp4")
     candidates.append(data_path / "videos" / f"{video_id}.mp4")
 
     for path in candidates:

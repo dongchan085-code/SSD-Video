@@ -8,11 +8,9 @@ No filtering, no verification - raw model outputs for label-free fine-tuning.
 import argparse
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 import torch
 import yaml
 from torch.utils.data import DataLoader
@@ -96,6 +94,12 @@ Options:
 
 Answer:"""
         return prompt
+
+    @staticmethod
+    def _image_content(frames: Any) -> List[Dict[str, Any]]:
+        if isinstance(frames, list):
+            return [{"type": "image", "image": frame} for frame in frames]
+        return [{"type": "image", "image": frames}]
     
     @torch.no_grad()
     def generate_samples(
@@ -151,13 +155,12 @@ Answer:"""
                     options=sample["options"],
                 )
 
+                frame_images = sample.get("frame_images", sample["frames"])
                 messages = [
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "image", "image": sample["frames"]},
-                            {"type": "text", "text": prompt},
-                        ]
+                        "content": self._image_content(frame_images)
+                        + [{"type": "text", "text": prompt}],
                     }
                 ]
 
@@ -197,15 +200,25 @@ Answer:"""
                     "skill_category": sample["skill_category"],
                     "task_type": sample["task_type"],
                     "completion": completion,
+                    "messages": [
+                        {"role": "user", "content": prompt},
+                        {"role": "assistant", "content": completion},
+                    ],
                     "completion_tokens": len(generated_ids),
                     "temperature": self.temperature,
                     "top_k": self.top_k,
+                    "top_p": self.top_p,
                     "source_data_path": sample.get("source_data_path"),
                     "source_split": sample.get("source_split"),
                     "video_relpath": sample.get("video_relpath"),
                     "frame_indices": sample.get("frame_indices"),
+                    "frame_timestamps": sample.get("frame_timestamps"),
+                    "chunk_ids": sample.get("chunk_ids"),
                     "total_frames": sample.get("total_frames"),
-                    "num_frames": int(sample["frames"].shape[0]),
+                    "num_frames": len(frame_images) if isinstance(frame_images, list) else int(sample["frames"].shape[0]),
+                    "recent_frames_only": len(frame_images) if isinstance(frame_images, list) else int(sample["frames"].shape[0]),
+                    "chunk_duration": sample.get("chunk_duration", 1.0),
+                    "fps": sample.get("fps", 1.0),
                 }
 
                 buffer.append(json.dumps(output_sample))
@@ -272,6 +285,9 @@ def main():
         frame_sampling_strategy=config["data"].get("frame_sampling_strategy", "uniform"),
         resize_shortest_edge=config["data"].get("resize_shortest_edge", 224),
         memory_skill_oversample_ratio=config["data"].get("memory_skill_oversample_ratio", 2.0),
+        recent_frames_only=config["data"].get("recent_frames_only"),
+        chunk_duration=config["data"].get("chunk_duration", 1.0),
+        fps=config["data"].get("fps", 1.0),
         enable_cache=True,
     )
     

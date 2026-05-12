@@ -29,6 +29,11 @@ from ssd_vlm.training.utils import (
     save_checkpoint,
 )
 
+try:
+    from accelerate import Accelerator
+except ImportError:  # pragma: no cover - optional at import time
+    Accelerator = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,6 +67,15 @@ class LoRATrainer:
 
         self.lora_config = lora_config
         self.training_config = training_config
+        self.gradient_accumulation_steps = training_config.get("gradient_accumulation_steps", 1)
+        backend = training_config.get("backend", "accelerate")
+        self.accelerator = (
+            Accelerator(gradient_accumulation_steps=self.gradient_accumulation_steps)
+            if backend == "accelerate" and Accelerator is not None
+            else None
+        )
+        if self.accelerator is not None:
+            self.device = self.accelerator.device
 
         # Resolve dtype and device_map from model config
         model_config = model_config or {}
@@ -70,6 +84,8 @@ class LoRATrainer:
                      "float32": torch.float32}
         torch_dtype = dtype_map.get(dtype_str, torch.bfloat16)
         device_map = model_config.get("device_map", "auto")
+        if self.accelerator is not None:
+            device_map = None
 
         # Load model and processor
         logger.info(f"Loading model: {model_id}")
@@ -106,7 +122,6 @@ class LoRATrainer:
         self.learning_rate = training_config.get("learning_rate", 5e-4)
         self.warmup_ratio = training_config.get("warmup_ratio", 0.1)
         self.early_stopping_patience = training_config.get("early_stopping_patience", 3)
-        self.gradient_accumulation_steps = training_config.get("gradient_accumulation_steps", 1)
 
         self.optimizer = None
         self.scheduler = None
@@ -143,8 +158,29 @@ class LoRATrainer:
             math.ceil(len(train_dataloader) / self.gradient_accumulation_steps) * self.num_epochs,
         )
         self.setup_optimizer(num_training_steps)
-        
-        self.model.to(self.device)
+
+        if self.accelerator is not None:
+            if eval_dataloader is not None:
+                self.model, self.optimizer, train_dataloader, eval_dataloader, self.scheduler = (
+                    self.accelerator.prepare(
+                        self.model,
+                        self.optimizer,
+                        train_dataloader,
+                        eval_dataloader,
+                        self.scheduler,
+                    )
+                )
+            else:
+                self.model, self.optimizer, train_dataloader, self.scheduler = (
+                    self.accelerator.prepare(
+                        self.model,
+                        self.optimizer,
+                        train_dataloader,
+                        self.scheduler,
+                    )
+                )
+        elif not getattr(self.model, "hf_device_map", None):
+            self.model.to(self.device)
         self.optimizer.zero_grad(set_to_none=True)
         
         optimizer_step = 0
@@ -161,8 +197,9 @@ class LoRATrainer:
             with tqdm(total=len(train_dataloader), desc=f"Epoch {epoch + 1}") as pbar:
                 for batch_idx, batch in enumerate(train_dataloader):
                     # Move batch to device
-                    batch = {k: v.to(self.device) if torch.is_tensor(v) else v 
-                            for k, v in batch.items()}
+                    if self.accelerator is None:
+                        batch = {k: v.to(self.device) if torch.is_tensor(v) else v
+                                for k, v in batch.items()}
                     
                     # Forward pass
                     outputs = self.model(**batch)
@@ -170,7 +207,11 @@ class LoRATrainer:
                     loss = outputs.loss
                     
                     # Backward pass
-                    (loss / self.gradient_accumulation_steps).backward()
+                    scaled_loss = loss / self.gradient_accumulation_steps
+                    if self.accelerator is not None:
+                        self.accelerator.backward(scaled_loss)
+                    else:
+                        scaled_loss.backward()
                     
                     epoch_loss += loss.item()
                     should_step = (
@@ -179,10 +220,16 @@ class LoRATrainer:
                     )
 
                     if should_step:
-                        torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(),
-                            self.training_config.get("max_grad_norm", 1.0)
-                        )
+                        if self.accelerator is not None:
+                            self.accelerator.clip_grad_norm_(
+                                self.model.parameters(),
+                                self.training_config.get("max_grad_norm", 1.0),
+                            )
+                        else:
+                            torch.nn.utils.clip_grad_norm_(
+                                self.model.parameters(),
+                                self.training_config.get("max_grad_norm", 1.0)
+                            )
                         self.optimizer.step()
                         self.scheduler.step()
                         self.optimizer.zero_grad(set_to_none=True)
@@ -196,8 +243,11 @@ class LoRATrainer:
                     
                     # Save checkpoint
                     if should_step and optimizer_step % self.training_config.get("save_steps", 100) == 0:
+                        if self.accelerator is not None and not self.accelerator.is_main_process:
+                            pbar.update(1)
+                            continue
                         save_checkpoint(
-                            self.model,
+                            self._unwrap_model(),
                             self.optimizer,
                             self.scheduler,
                             epoch,
@@ -230,12 +280,15 @@ class LoRATrainer:
         self._save_model(-1, "final")
 
         # Merge LoRA weights into base model for inference
-        logger.info("Merging LoRA weights into base model...")
-        merged_model = self.model.merge_and_unload()
-        merged_dir = self.output_dir / "merged"
-        self.processor.save_pretrained(str(merged_dir))
-        merged_model.save_pretrained(str(merged_dir))
-        logger.info(f"Merged model saved to {merged_dir}")
+        if self.accelerator is None or self.accelerator.is_main_process:
+            logger.info("Merging LoRA weights into base model...")
+            merged_model = self._unwrap_model().merge_and_unload()
+            merged_dir = self.output_dir / "merged"
+            self.processor.save_pretrained(str(merged_dir))
+            merged_model.save_pretrained(str(merged_dir))
+            logger.info(f"Merged model saved to {merged_dir}")
+        if self.accelerator is not None:
+            self.accelerator.wait_for_everyone()
     
     @torch.no_grad()
     def _evaluate(self, dataloader: DataLoader) -> float:
@@ -246,8 +299,9 @@ class LoRATrainer:
         num_batches = 0
         
         for batch in tqdm(dataloader, desc="Evaluating"):
-            batch = {k: v.to(self.device) if torch.is_tensor(v) else v 
-                    for k, v in batch.items()}
+            if self.accelerator is None:
+                batch = {k: v.to(self.device) if torch.is_tensor(v) else v
+                        for k, v in batch.items()}
             
             outputs = self.model(**batch)
             
@@ -257,15 +311,22 @@ class LoRATrainer:
         self.model.train()
         
         return total_loss / num_batches
+
+    def _unwrap_model(self):
+        if self.accelerator is not None:
+            return self.accelerator.unwrap_model(self.model)
+        return self.model
     
     def _save_model(self, epoch: int, suffix: str = ""):
         """Save model checkpoint."""
+        if self.accelerator is not None and not self.accelerator.is_main_process:
+            return
         if suffix:
             save_dir = self.output_dir / f"checkpoint_epoch{epoch}_{suffix}"
         else:
             save_dir = self.output_dir / f"checkpoint_epoch{epoch}"
         
-        self.model.save_pretrained(str(save_dir))
+        self._unwrap_model().save_pretrained(str(save_dir))
         self.processor.save_pretrained(str(save_dir))
         
         logger.info(f"Model saved to {save_dir}")
@@ -337,6 +398,8 @@ def main():
         pin_memory=config["training"].get("dataloader_pin_memory", True),
         drop_last=config["training"].get("dataloader_drop_last", False),
         seed=config.get("seed", 42),
+        persistent_workers=config["training"].get("dataloader_persistent_workers", False),
+        prefetch_factor=config["training"].get("dataloader_prefetch_factor", 2),
     )
     
     # Train

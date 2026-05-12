@@ -23,7 +23,10 @@ data:
   
   # Video frame sampling
   num_frames: 4
-  frame_sampling_strategy: uniform
+  recent_frames_only: 4
+  chunk_duration: 1.0
+  fps: 1.0
+  frame_sampling_strategy: recent
   resize_shortest_edge: 224
   
   # Memory skill oversampling

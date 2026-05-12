@@ -25,6 +25,7 @@ lora:
   init_lora_weights: true
 
 training:
+  backend: accelerate
   output_dir: ./outputs/lora_checkpoint
   num_train_epochs: 2
   per_device_train_batch_size: 4

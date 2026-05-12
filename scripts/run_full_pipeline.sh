@@ -61,7 +61,7 @@ echo "Learning rate: 5e-4, Epochs: 2"
 echo ""
 
 if [ -f "${OUTPUT_DIR}/ssd_samples/samples.jsonl" ]; then
-    torchrun --nproc_per_node=${NUM_GPUS} \
+    accelerate launch --num_processes=${NUM_GPUS} \
         "${PROJECT_DIR}/ssd_vlm/training/train_lora.py" \
         --config "${PROJECT_DIR}/configs/train_lora.yaml" \
         --samples_path "${OUTPUT_DIR}/ssd_samples/samples.jsonl" \

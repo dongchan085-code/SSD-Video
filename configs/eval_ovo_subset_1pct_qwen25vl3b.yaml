@@ -1,10 +1,10 @@
-# OVO-Bench Evaluation Configuration - Base Model
-# Evaluates Qwen3-VL-8B-Instruct on OVO-Bench with 4-frame budget
+# GPU-only pipeline check on a smaller VLM for the 1% OVO subset.
 
 model:
-  model_id: Qwen/Qwen3-VL-8B-Instruct
-  dtype: bfloat16
-  device_map: auto
+  model_id: Qwen/Qwen2.5-VL-3B-Instruct
+  dtype: float16
+  device_map: cuda
+  max_memory: null
   load_in_8bit: false
 
 inference:
@@ -14,21 +14,21 @@ inference:
   fps: 1.0
   frame_sampling_strategy: recent
   resize_shortest_edge: 224
-  max_new_tokens: 512
+  max_new_tokens: 16
   temperature: 1.0
   top_p: 1.0
   top_k: 1
   do_sample: false
-  use_cache: true
+  use_cache: false
 
 data:
   dataset_name: ovo_bench
-  data_path: ./data/ovo_bench
-  anno_path: ./data/ovo_bench/ovo_bench_new.json
-  chunked_dir: ./data/ovo_bench/chunked_videos
+  data_path: D:/ssd_video_data/ovo_subset_1pct
+  anno_path: D:/ssd_video_data/ovo_subset_1pct/ovo_bench_subset.json
+  chunked_dir: D:/ssd_video_data/ovo_subset_1pct/chunked_videos
   split: test
-  batch_size: 16
-  num_workers: 4
+  batch_size: 1
+  num_workers: 0
 
 evaluation:
   metrics:
@@ -36,6 +36,8 @@ evaluation:
     - per_task_accuracy
     - lock_fork_split
   save_predictions: true
+  partial_predictions_file: ./results/ovo_1pct/ovo_base_qwen25vl3b_gpu.partial_predictions.jsonl
+  resume_partial: true
   output_format: json
   save_detailed_results: true
 

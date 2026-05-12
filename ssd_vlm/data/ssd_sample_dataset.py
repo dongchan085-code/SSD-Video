@@ -14,7 +14,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from torch.utils.data import DataLoader, Dataset, random_split
 
-from ssd_vlm.data.video_utils import load_video_frames, resolve_video_path
+from ssd_vlm.data.video_utils import (
+    load_video_frame_images,
+    load_video_frames,
+    resolve_video_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +101,16 @@ class SSDSampleDataset(Dataset):
     def _format_vqa(self, sample: Dict[str, Any]) -> str:
         return f"Question: {sample['question']}\n\nAnswer:"
 
+    def _get_prompt_completion(self, sample: Dict[str, Any], idx: int) -> Tuple[str, str]:
+        messages = sample.get("messages")
+        if isinstance(messages, list) and len(messages) >= 2:
+            prompt_msg = messages[0].get("content", "")
+            completion_msg = messages[-1].get("content", "")
+            if isinstance(prompt_msg, str) and isinstance(completion_msg, str):
+                return prompt_msg, completion_msg.strip()
+        prompt = self._format_vqa(sample) if idx in self.vqa_indices else self._format_mc(sample)
+        return prompt, sample.get("completion", "").strip()
+
     def _resolve_video(self, sample: Dict[str, Any]) -> Tuple[Path, Path]:
         root = self.source_data_path or sample.get("source_data_path")
         if not root:
@@ -113,11 +127,25 @@ class SSDSampleDataset(Dataset):
 
     def _load_multimodal_item(self, idx: int) -> Dict[str, Any]:
         sample = self.raw_samples[idx]
-        prompt = self._format_vqa(sample) if idx in self.vqa_indices else self._format_mc(sample)
-        completion = sample.get("completion", "").strip()
+        prompt, completion = self._get_prompt_completion(sample, idx)
         data_root, video_path = self._resolve_video(sample)
         cache_dir = self.cache_dir or (data_root / ".frame_cache")
-        frames, frame_indices, total_frames = load_video_frames(
+        frame_images, frame_indices, total_frames, frame_timestamps, chunk_ids = load_video_frame_images(
+            video_path=video_path,
+            num_frames=sample.get("num_frames", self.num_frames),
+            frame_sampling_strategy=sample.get(
+                "frame_sampling_strategy",
+                self.frame_sampling_strategy,
+            ),
+            resize_shortest_edge=None,
+            cache_dir=cache_dir,
+            enable_cache=self.enable_cache,
+            frame_indices=sample.get("frame_indices"),
+            recent_frames_only=sample.get("recent_frames_only"),
+            chunk_duration=sample.get("chunk_duration", 1.0),
+            fps=sample.get("fps", 1.0),
+        )
+        frames, _, _ = load_video_frames(
             video_path=video_path,
             num_frames=sample.get("num_frames", self.num_frames),
             frame_sampling_strategy=sample.get(
@@ -131,6 +159,7 @@ class SSDSampleDataset(Dataset):
         )
         return {
             "frames": frames,
+            "frame_images": frame_images,
             "prompt": prompt,
             "completion": completion,
             "video_id": sample["video_id"],
@@ -139,13 +168,14 @@ class SSDSampleDataset(Dataset):
             "answer_idx": sample.get("answer_idx", 0),
             "video_path": str(video_path),
             "frame_indices": frame_indices,
+            "frame_timestamps": sample.get("frame_timestamps", frame_timestamps),
+            "chunk_ids": sample.get("chunk_ids", chunk_ids),
             "total_frames": total_frames,
         }
 
     def _load_text_only_item(self, idx: int) -> Dict[str, torch.Tensor]:
         sample = self.raw_samples[idx]
-        prompt = self._format_vqa(sample) if idx in self.vqa_indices else self._format_mc(sample)
-        completion = sample.get("completion", "")
+        prompt, completion = self._get_prompt_completion(sample, idx)
         full_text = prompt + " " + completion
 
         encoding = self.tokenizer(
@@ -197,43 +227,65 @@ class SSDSampleDataCollator:
             "labels": torch.stack([f["labels"] for f in features]),
         }
 
+    def _apply_chat_template(self, conversations, add_generation_prompt: bool = False):
+        kwargs = {
+            "tokenize": True,
+            "add_generation_prompt": add_generation_prompt,
+            "return_dict": True,
+            "return_tensors": "pt",
+        }
+        try:
+            return self.processor.apply_chat_template(
+                conversations,
+                **kwargs,
+                padding=True,
+                truncation=True,
+                max_length=self.max_seq_length,
+            )
+        except TypeError:
+            return self.processor.apply_chat_template(
+                conversations,
+                **kwargs,
+                processor_kwargs={
+                    "padding": True,
+                    "truncation": True,
+                    "max_length": self.max_seq_length,
+                },
+            )
+
+    @staticmethod
+    def _image_content(frames: Any) -> List[Dict[str, Any]]:
+        if isinstance(frames, list):
+            return [{"type": "image", "image": frame} for frame in frames]
+        return [{"type": "image", "image": frames}]
+
     def _collate_multimodal(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         full_conversations = []
+        prompt_conversations = []
 
         for feature in features:
-            user_content = [
-                {"type": "image", "image": feature["frames"]},
-                {"type": "text", "text": feature["prompt"]},
-            ]
+            user_content = self._image_content(feature.get("frame_images", feature["frames"]))
+            user_content.append({"type": "text", "text": feature["prompt"]})
+            prompt_conversations.append([
+                {"role": "user", "content": user_content},
+            ])
             full_conversations.append([
                 {"role": "user", "content": user_content},
                 {"role": "assistant", "content": [{"type": "text", "text": feature["completion"]}]},
             ])
 
-        # Single apply_chat_template call (was 2x before)
-        full_inputs = self.processor.apply_chat_template(
-            full_conversations,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-            processor_kwargs={
-                "padding": True,
-                "truncation": True,
-                "max_length": self.max_seq_length,
-            },
-        )
+        full_inputs = self._apply_chat_template(full_conversations)
         full_inputs.pop("token_type_ids", None)
+        prompt_inputs = self._apply_chat_template(
+            prompt_conversations,
+            add_generation_prompt=True,
+        )
+        prompt_inputs.pop("token_type_ids", None)
 
-        # Compute prompt length by counting completion tokens from the end
         labels = full_inputs["input_ids"].clone()
         labels[full_inputs["attention_mask"] == 0] = -100
-        tokenizer = self.processor.tokenizer
-        for row_idx, feature in enumerate(features):
-            comp_ids = tokenizer(
-                feature["completion"], add_special_tokens=False
-            )["input_ids"]
-            seq_len = int(full_inputs["attention_mask"][row_idx].sum().item())
-            prompt_len = max(0, seq_len - len(comp_ids))
+        for row_idx in range(len(features)):
+            prompt_len = int(prompt_inputs["attention_mask"][row_idx].sum().item())
             labels[row_idx, :min(prompt_len, labels.size(1))] = -100
 
         batch = dict(full_inputs)

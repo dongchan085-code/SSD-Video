@@ -5,17 +5,18 @@ Handles video loading, frame sampling, and memory skill oversampling.
 
 import json
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import cv2
-import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from ssd_vlm.data.video_utils import load_video_frames, resolve_video_path
+from ssd_vlm.data.video_utils import (
+    load_video_frame_images,
+    load_video_frames,
+    resolve_video_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,9 @@ class PerceptionTestDataset(Dataset):
         memory_skill_oversample_ratio: float = 2.0,
         cache_dir: Optional[str] = None,
         enable_cache: bool = True,
+        recent_frames_only: Optional[int] = None,
+        chunk_duration: float = 1.0,
+        fps: float = 1.0,
     ):
         """
         Initialize Perception Test dataset.
@@ -62,6 +66,9 @@ class PerceptionTestDataset(Dataset):
         self.resize_shortest_edge = resize_shortest_edge
         self.memory_skill_oversample_ratio = memory_skill_oversample_ratio
         self.enable_cache = enable_cache
+        self.recent_frames_only = recent_frames_only or num_frames
+        self.chunk_duration = chunk_duration
+        self.fps = fps
         
         # Setup cache directory
         if cache_dir is None:
@@ -136,9 +143,16 @@ class PerceptionTestDataset(Dataset):
 
             # Apply memory skill oversampling
             if is_memory and self.memory_skill_oversample_ratio > 1.0:
-                num_repeats = int(self.memory_skill_oversample_ratio - 1)
+                extra = self.memory_skill_oversample_ratio - 1.0
+                num_repeats = int(extra)
                 for _ in range(num_repeats):
                     samples.append(sample.copy())
+                fractional = extra - num_repeats
+                if fractional > 0:
+                    # Deterministic fractional oversampling so 1.5x is not rounded to 1.0x.
+                    bucket = (sum(ord(ch) for ch in video_id) % 1000) / 1000.0
+                    if bucket < fractional:
+                        samples.append(sample.copy())
                 if annotated_skill != "memory":
                     temporal_oversampled += 1
 
@@ -163,6 +177,25 @@ class PerceptionTestDataset(Dataset):
             cache_dir=self.cache_dir,
             enable_cache=self.enable_cache,
         )
+
+    def _get_video_images(self, video_id: str):
+        """Load raw PIL frames for the VLM processor path."""
+        video_path = resolve_video_path(self.data_path, video_id)
+        return load_video_frame_images(
+            video_path=video_path,
+            num_frames=self.num_frames,
+            frame_sampling_strategy=self.frame_sampling_strategy,
+            resize_shortest_edge=None,
+            cache_dir=self.cache_dir,
+            enable_cache=self.enable_cache,
+            recent_frames_only=(
+                self.recent_frames_only
+                if self.frame_sampling_strategy in {"recent", "recent_window", "simplestream"}
+                else None
+            ),
+            chunk_duration=self.chunk_duration,
+            fps=self.fps,
+        )
     
     def __len__(self) -> int:
         """Return dataset size."""
@@ -184,11 +217,14 @@ class PerceptionTestDataset(Dataset):
         """
         sample = self.samples[idx]
         
-        # Load frames
+        # Load both compatibility tensors and raw PIL images. Qwen-VL training/eval
+        # should use frame_images; frames is retained for lightweight tests.
         frames_tensor, frame_indices, total_frames = self._get_video_frames(sample["video_id"])
+        frame_images, _, _, frame_timestamps, chunk_ids = self._get_video_images(sample["video_id"])
         
         return {
             "frames": frames_tensor,
+            "frame_images": frame_images,
             "question": sample["question"],
             "options": sample["options"],
             "answer_idx": sample["answer_idx"],
@@ -197,6 +233,10 @@ class PerceptionTestDataset(Dataset):
             "video_id": sample["video_id"],
             "video_relpath": f"videos/{sample['video_id']}.mp4",
             "frame_indices": frame_indices,
+            "frame_timestamps": frame_timestamps,
+            "chunk_ids": chunk_ids,
+            "chunk_duration": self.chunk_duration,
+            "fps": self.fps,
             "total_frames": total_frames,
             "source_split": self.split,
             "source_data_path": str(self.data_path.resolve()),
@@ -240,6 +280,17 @@ def create_perception_test_dataloader(
     )
     
     use_workers = num_workers > 0
+    def _collate(batch):
+        # Keep this helper usable with PIL frames by leaving them as Python lists.
+        out = {}
+        for key in batch[0].keys():
+            values = [item[key] for item in batch]
+            if key == "frames":
+                out[key] = torch.stack(values)
+            else:
+                out[key] = values
+        return out
+
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -247,6 +298,7 @@ def create_perception_test_dataloader(
         shuffle=shuffle,
         pin_memory=pin_memory,
         drop_last=(split == "train"),
+        collate_fn=_collate,
         persistent_workers=True if use_workers else False,
         prefetch_factor=4 if use_workers else None,
     )

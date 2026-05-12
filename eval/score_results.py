@@ -32,6 +32,11 @@ class ResultsScorer:
             "overall_accuracy": results.get("overall_accuracy", 0.0),
             "lock_accuracy": results.get("lock_accuracy", 0.0),
             "fork_accuracy": results.get("fork_accuracy", 0.0),
+            "realtime_accuracy": results.get("realtime_accuracy", results.get("lock_accuracy", 0.0)),
+            "backward_accuracy": results.get("backward_accuracy", results.get("fork_accuracy", 0.0)),
+            "forward_accuracy": results.get("forward_accuracy"),
+            "rt_bwd_avg": results.get("rt_bwd_avg", results.get("ovo_avg", results.get("overall_accuracy", 0.0))),
+            "ovo_total_avg_3way": results.get("ovo_total_avg_3way", results.get("overall_accuracy", 0.0)),
             "per_task_accuracy": results.get("per_task_accuracy", {}),
             "num_correct": results.get("num_correct", 0),
             "num_total": results.get("num_total", 0),
@@ -65,11 +70,15 @@ class ResultsScorer:
                 "overall_accuracy": base_results.get("overall_accuracy", 0.0),
                 "lock_accuracy": base_results.get("lock_accuracy", 0.0),
                 "fork_accuracy": base_results.get("fork_accuracy", 0.0),
+                "rt_bwd_avg": base_results.get("rt_bwd_avg", base_results.get("overall_accuracy", 0.0)),
+                "ovo_total_avg_3way": base_results.get("ovo_total_avg_3way", base_results.get("overall_accuracy", 0.0)),
             },
             "ssd": {
                 "overall_accuracy": ssd_results.get("overall_accuracy", 0.0),
                 "lock_accuracy": ssd_results.get("lock_accuracy", 0.0),
                 "fork_accuracy": ssd_results.get("fork_accuracy", 0.0),
+                "rt_bwd_avg": ssd_results.get("rt_bwd_avg", ssd_results.get("overall_accuracy", 0.0)),
+                "ovo_total_avg_3way": ssd_results.get("ovo_total_avg_3way", ssd_results.get("overall_accuracy", 0.0)),
             },
             "improvement": {
                 "overall_accuracy": (
@@ -84,6 +93,14 @@ class ResultsScorer:
                     ssd_results.get("fork_accuracy", 0.0) - 
                     base_results.get("fork_accuracy", 0.0)
                 ),
+                "rt_bwd_avg": (
+                    ssd_results.get("rt_bwd_avg", ssd_results.get("overall_accuracy", 0.0)) -
+                    base_results.get("rt_bwd_avg", base_results.get("overall_accuracy", 0.0))
+                ),
+                "ovo_total_avg_3way": (
+                    ssd_results.get("ovo_total_avg_3way", ssd_results.get("overall_accuracy", 0.0)) -
+                    base_results.get("ovo_total_avg_3way", base_results.get("overall_accuracy", 0.0))
+                ),
             },
         }
 
@@ -94,6 +111,12 @@ class ResultsScorer:
             "Mem_Avg_ssd": comparison["ssd"]["fork_accuracy"],
             "Delta_RT": comparison["improvement"]["lock_accuracy"],
             "Delta_Mem": comparison["improvement"]["fork_accuracy"],
+            "RT_Bwd_Avg_base": comparison["base"]["rt_bwd_avg"],
+            "RT_Bwd_Avg_ssd": comparison["ssd"]["rt_bwd_avg"],
+            "Delta_RT_Bwd_Avg": comparison["improvement"]["rt_bwd_avg"],
+            "OVO_3Way_base": comparison["base"]["ovo_total_avg_3way"],
+            "OVO_3Way_ssd": comparison["ssd"]["ovo_total_avg_3way"],
+            "Delta_OVO_3Way": comparison["improvement"]["ovo_total_avg_3way"],
         }
         
         # Per-task comparison

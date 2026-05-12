@@ -11,7 +11,10 @@ model:
 
 inference:
   num_frames: 4
-  frame_sampling_strategy: uniform
+  recent_frames_only: 4
+  chunk_duration: 1.0
+  fps: 1.0
+  frame_sampling_strategy: recent
   resize_shortest_edge: 224
   max_new_tokens: 512
   temperature: 1.0
@@ -23,6 +26,8 @@ inference:
 data:
   dataset_name: ovo_bench
   data_path: ./data/ovo_bench
+  anno_path: ./data/ovo_bench/ovo_bench_new.json
+  chunked_dir: ./data/ovo_bench/chunked_videos
   split: test
   batch_size: 16
   num_workers: 4
