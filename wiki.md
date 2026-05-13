@@ -97,7 +97,8 @@ JSONL is written incrementally (every 100 batches) — survives interruption. Fr
 | `figures/plot_all.py` | viz orchestrator | — |
 | `figures/plot_*.py` (8 scripts) | viz | — |
 | `scripts/download_data.sh` / `download_mini_data.sh` / `download_ovo_sources.py` | data download | — |
-| `scripts/prepare_mini_data.py` / `prepare_ovo_subset.py` / `chunk_ovo_subset.py` / `extract_ovo_src_subset.py` | data prep | — |
+| `scripts/download_extract_chunked.py` | **preferred** stream-download + extract HF `chunked_videos.tar.part*` directly to `chunked_videos/`, deleting each tar part as soon as it is consumed | — |
+| `scripts/prepare_mini_data.py` / `prepare_ovo_subset.py` / `chunk_ovo_subset.py` / `extract_ovo_src_subset.py` | data prep (local chunking path, fallback) | — |
 | `scripts/smoke_qwen8b_load.py` | preflight | — |
 
 PowerShell variants: `scripts/prepare_ovo_subset_pipeline.ps1`, `scripts/run_simplestream_baseline.ps1`.
@@ -155,7 +156,7 @@ No `pytest.ini`/`conftest.py`/`pyproject.toml`. Coverage gaps: **no test exercis
 
 ## OVO-Bench data layout (D:\ on the T4 box)
 
-**D:\ is the Azure VM temporary disk** — wiped on VM stop/start. Re-running `scripts/download_ovo_sources.py` repopulates it. Layout after the SimpleStream-reproduction refactor:
+**D:\ is the Azure VM temporary disk** — wiped on VM stop/start. **Preferred bootstrap path: `scripts/download_extract_chunked.py`** stream-downloads HF's pre-chunked archive (152 GB total, 15 parts) and deletes each tar part as soon as the extractor reads it. Peak disk usage stays near `extracted_so_far + 1-2 parts`; the previously documented `download_ovo_sources.py + extract_ovo_src_subset.py + chunk_ovo_subset.py` chain works but produced ~100 GB of locally-chunked videos and requires `src_videos.tar` (43 GB) alongside, which overflows the 176 GB disk. Layout after the SimpleStream-reproduction refactor:
 
 ```
 D:\ssd_video_data\

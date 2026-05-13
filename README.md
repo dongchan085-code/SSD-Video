@@ -179,19 +179,49 @@ export PYTHONPATH=.                     # the scripts import from ssd_vlm/
 export PYTHONIOENCODING=utf-8           # avoids cp949 errors on Windows
 ```
 
-### 1. Download OVO-Bench source tar parts (~43 GB)
+### 1. Pull OVO-Bench data from HuggingFace
+
+Two HF archives are relevant:
+
+| Archive | Size | Contents |
+|---|---|---|
+| `chunked_videos.tar.part{aa..ao}` | **152 GB** (15 parts) | Pre-cut chunk videos — what the eval actually reads |
+| `src_videos.tar.part{aa..ae}` | 43 GB (5 parts) | Raw source clips — only needed if you want to re-chunk locally |
+
+**Recommended path: skip `src_videos.tar` entirely and stream-download the
+pre-chunked archive.** Doing the chunking locally with `chunk_ovo_subset.py`
+produced ~100 GB of output (ffmpeg stream-copy preserves source quality), and
+the resulting chunks are still functionally identical to the HF ones at the
+4-frame eval budget.
 
 ```bash
+# Stream-download + extract chunked_videos.tar.part{aa..ao} (~152 GB).
+# Each tar part is deleted as soon as the extractor finishes reading it,
+# so peak disk usage stays near the extracted-size + 1-2 parts.
+python -u scripts/download_extract_chunked.py \
+  --repo_id JoeLeelyf/OVO-Bench \
+  --tar_glob "chunked_videos.tar.part*" \
+  --parts_dir D:/ssd_video_data/_chunked_parts \
+  --output_dir D:/ssd_video_data/chunked_videos
+
+# Pull the annotation file (small, no streaming needed)
 python -u scripts/download_ovo_sources.py \
   --data_root D:/ssd_video_data \
-  --parts_dir D:/ssd_video_data/ovo_src_parts \
   --anno_path D:/ssd_video_data/ovo_bench_new.json \
-  --max_gb 100
+  --skip_parts
 ```
 
-Pulls `src_videos.tar.part*` from the HF dataset `JoeLeelyf/OVO-Bench` plus the
-GitHub `ovo_bench_new.json` annotation file. Use `--skip_parts` to only refresh
-the annotation when iterating.
+The `chunked_videos/` directory it writes is the only thing the eval needs.
+**On a 176 GB D:\ disk you must clear any prior `ovo_src_parts/`, `src_videos/`,
+and `chunked_videos/` first**, otherwise the 152 GB extraction will overflow:
+
+```bash
+rm -rf D:/ssd_video_data/ovo_src_parts D:/ssd_video_data/src_videos D:/ssd_video_data/chunked_videos
+```
+
+(Legacy path — local chunking — still works via the original
+`scripts/download_ovo_sources.py` + `extract_ovo_src_subset.py` +
+`chunk_ovo_subset.py` chain; see git history for an example session.)
 
 ### 2. Fullset manifest (one-time)
 
