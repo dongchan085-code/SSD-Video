@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import torch
-import yaml
 from peft import LoraConfig, get_peft_model
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
@@ -28,6 +27,7 @@ from ssd_vlm.training.utils import (
     log_model_info,
     save_checkpoint,
 )
+from ssd_vlm.utils.config import load_config
 
 try:
     from accelerate import Accelerator
@@ -330,13 +330,6 @@ class LoRATrainer:
         self.processor.save_pretrained(str(save_dir))
         
         logger.info(f"Model saved to {save_dir}")
-
-
-def load_config(config_path: str) -> Dict[str, Any]:
-    """Load YAML configuration."""
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
 
 
 def main():

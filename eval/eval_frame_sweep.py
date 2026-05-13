@@ -9,8 +9,9 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-import yaml
 from eval_ovo_bench import OVOBenchEvaluator
+
+from ssd_vlm.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -96,13 +97,6 @@ class FrameSweepEvaluator:
         logger.info(f"\nFrame sweep results saved to {output_file}")
         
         return results
-
-
-def load_config(config_path: str) -> Dict[str, Any]:
-    """Load YAML configuration."""
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
 
 
 def main():

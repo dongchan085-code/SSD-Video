@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 import torch
-import yaml
 from tqdm import tqdm
 
 from ssd_vlm.data.ovo_bench_dataset import FORK_TASKS, LOCK_TASKS, OVOBenchDataset
@@ -27,6 +26,7 @@ from ssd_vlm.simplestream import (
     prediction_to_simplestream_record,
     score_prediction,
 )
+from ssd_vlm.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -128,18 +128,6 @@ class OVOBenchEvaluator:
             fps=self.fps,
         )
     
-    def _format_prompt(self, question: str, options: List[str]) -> str:
-        """Backward-compatible default for tests that call this method directly."""
-        options_text = "\n".join(
-            f"{chr(65 + i)}: {opt}" for i, opt in enumerate(options)
-        )
-        return f"""Question: {question}
-
-Options:
-{options_text}
-
-Answer:"""
-    
     @torch.no_grad()
     def _generate_answer(
         self,
@@ -213,55 +201,6 @@ Answer:"""
         )
         
         return answer.strip()
-    
-    def _extract_choice(self, text: str) -> Optional[int]:
-        """
-        Extract choice index from generated text.
-
-        Priority order:
-        1. Explicit "answer is X" / "answer: X" patterns
-        2. Leading choice letter at start of text ("A.", "A)", "A ")
-        3. Parenthesised choice "(A)"
-        4. Bare word-boundary choice letter
-        5. Digit (0-3)
-
-        Args:
-            text: Generated text
-
-        Returns:
-            Choice index (0-3) or None
-        """
-        import re
-
-        text_stripped = text.strip()
-        text_upper = text_stripped.upper()
-
-        # 1. "answer is X" / "answer: X" / "answer = X"
-        m = re.search(r'ANSWER\s*[IS:=]+\s*([A-D])\b', text_upper)
-        if m:
-            return ord(m.group(1)) - ord('A')
-
-        # 2. Leading letter: "A.", "A)", "A " or just "A" at start
-        m = re.match(r'^([A-D])[\.\)\s:]', text_upper)
-        if m:
-            return ord(m.group(1)) - ord('A')
-
-        # 3. Parenthesised: "(A)" or "[A]"
-        m = re.search(r'[\(\[]\s*([A-D])\s*[\)\]]', text_upper)
-        if m:
-            return ord(m.group(1)) - ord('A')
-
-        # 4. Word-boundary standalone letter
-        m = re.search(r'\b([A-D])\b', text_upper)
-        if m:
-            return ord(m.group(1)) - ord('A')
-
-        # 5. Digit fallback
-        m = re.search(r'\b([0-3])\b', text)
-        if m:
-            return int(m.group(1))
-
-        return None
     
     def evaluate(
         self,
@@ -508,13 +447,6 @@ Answer:"""
             logger.info(f"Results saved to {output_file}")
         
         return results
-
-
-def load_config(config_path: str) -> Dict[str, Any]:
-    """Load YAML configuration."""
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
 
 
 def main():

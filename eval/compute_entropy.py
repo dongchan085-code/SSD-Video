@@ -23,18 +23,11 @@ from tqdm import tqdm
 
 from ssd_vlm.data.ovo_bench_dataset import FORK_TASKS, LOCK_TASKS, OVOBenchDataset
 from ssd_vlm.model_loading import load_vlm_processor_and_model
+from ssd_vlm.simplestream import format_ovo_prompt
 
 logger = logging.getLogger(__name__)
 
 ANSWER_TOKENS = ["A", "B", "C", "D"]
-
-
-def format_prompt(question: str, options: List[str]) -> str:
-    """Format question + options into a QA prompt."""
-    options_text = "\n".join(
-        f"{chr(65 + i)}: {opt}" for i, opt in enumerate(options)
-    )
-    return f"Question: {question}\n\nOptions:\n{options_text}\n\nAnswer:"
 
 
 # ── Core entropy computation ────────────────────────────────────────
@@ -72,6 +65,7 @@ class EntropyComputer:
         question: str,
         options: List[str],
         frames: Optional[torch.Tensor] = None,
+        task_type: str = "",
     ) -> Dict[str, float]:
         """
         Run a single forward pass and return entropy + rank at the
@@ -79,7 +73,7 @@ class EntropyComputer:
 
         Returns dict with keys: entropy, rank, gt_prob
         """
-        prompt = format_prompt(question, options)
+        prompt = format_ovo_prompt(task_type, question, options)
 
         messages = [{"role": "user", "content": [
             {"type": "text", "text": prompt},
@@ -133,6 +127,7 @@ class EntropyComputer:
                 sample["question"],
                 sample["options"],
                 frames=sample["frames"],
+                task_type=sample.get("task_type", ""),
             )
             entropy = result["entropy"]
             rank = self._rank_of_gt(result["probs"], sample["answer_idx"])

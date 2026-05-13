@@ -12,12 +12,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import torch
-import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from ssd_vlm.data.perception_test_dataset import PerceptionTestDataset
 from ssd_vlm.model_loading import load_vlm_processor_and_model
+from ssd_vlm.simplestream import format_ovo_prompt
+from ssd_vlm.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -65,23 +66,6 @@ class SSDSampleGenerator:
         self.model.eval()
         logger.info("Model loaded successfully")
     
-    def _format_prompt(
-        self,
-        question: str,
-        options: List[str],
-    ) -> str:
-        """Format question and options into prompt."""
-        options_text = "\n".join(
-            f"{chr(65 + i)}: {opt}" for i, opt in enumerate(options)
-        )
-        prompt = f"""Question: {question}
-
-Options:
-{options_text}
-
-Answer:"""
-        return prompt
-
     @staticmethod
     def _video_content(frames: Any) -> List[Dict[str, Any]]:
         # Send all frames as one video item so Qwen3-VL's temporal patching halves vision tokens.
@@ -138,7 +122,8 @@ Answer:"""
             sample_count = 0
 
             for sample in tqdm(loader, total=len(loader), desc="Generating samples"):
-                prompt = self._format_prompt(
+                prompt = format_ovo_prompt(
+                    task_type=sample.get("task_type", ""),
                     question=sample["question"],
                     options=sample["options"],
                 )
@@ -228,13 +213,6 @@ Answer:"""
 
         logger.info(f"Sample generation complete. Saved {sample_count} samples to {output_path}")
         return str(output_path)
-
-
-def load_config(config_path: str) -> Dict[str, Any]:
-    """Load YAML configuration."""
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
 
 
 def main():

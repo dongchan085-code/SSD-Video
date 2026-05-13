@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import torch
-import yaml
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -28,6 +27,7 @@ from ssd_vlm.training.utils import (
     log_gradient_stats,
     save_checkpoint,
 )
+from ssd_vlm.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -229,13 +229,6 @@ class FullFTTrainer:
         self.processor.save_pretrained(str(save_dir))
         
         logger.info(f"Model saved to {save_dir}")
-
-
-def load_config(config_path: str) -> Dict[str, Any]:
-    """Load YAML configuration."""
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
 
 
 def main():

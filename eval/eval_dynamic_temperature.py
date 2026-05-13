@@ -8,9 +8,10 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
-import yaml
-
 from eval_ovo_bench import OVOBenchEvaluator
+
+from ssd_vlm.simplestream import extract_choice
+from ssd_vlm.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class DynamicTemperatureEvaluator(OVOBenchEvaluator):
                 temperature=temperature,
                 top_k=top_k,
             )
-            answer_idx = self._extract_choice(answer_text)
+            answer_idx = extract_choice(answer_text)
             if answer_idx is None:
                 answer_idx = 0
 
@@ -130,11 +131,6 @@ class DynamicTemperatureEvaluator(OVOBenchEvaluator):
             logger.info(f"Results saved to {output_file}")
 
         return results
-
-
-def load_config(config_path: str) -> Dict[str, Any]:
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
 
 
 def main():

@@ -13,12 +13,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
-import yaml
 from scipy import stats
 from tqdm import tqdm
 
 from ssd_vlm.data.ovo_bench_dataset import FORK_TASKS, LOCK_TASKS, OVOBenchDataset
 from ssd_vlm.model_loading import load_vlm_processor_and_model
+from ssd_vlm.simplestream import format_ovo_prompt
+from ssd_vlm.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -81,19 +82,6 @@ class EntropyAnalyzer:
             num_frames=self.num_frames,
         )
     
-    def _format_prompt(self, question: str, options: List[str]) -> str:
-        """Format question and options into prompt."""
-        options_text = "\n".join(
-            f"{chr(65 + i)}: {opt}" for i, opt in enumerate(options)
-        )
-        prompt = f"""Question: {question}
-
-Options:
-{options_text}
-
-Answer:"""
-        return prompt
-    
     def _compute_entropy(self, logits: torch.Tensor) -> float:
         """
         Compute Shannon entropy from logits.
@@ -147,7 +135,7 @@ Answer:"""
                 task_type = sample.get("task_type", "unknown")
 
                 # Forward pass to get logits at answer position
-                prompt = self._format_prompt(sample["question"], sample["options"])
+                prompt = format_ovo_prompt(task_type, sample["question"], sample["options"])
                 messages = [{"role": "user", "content": [
                     {"type": "image", "image": sample["frames"]},
                     {"type": "text", "text": prompt},
@@ -248,13 +236,6 @@ Answer:"""
             logger.info(f"Results saved to {output_file}")
         
         return results
-
-
-def load_config(config_path: str) -> Dict[str, Any]:
-    """Load YAML configuration."""
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
 
 
 def main():

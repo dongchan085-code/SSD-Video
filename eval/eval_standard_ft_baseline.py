@@ -4,18 +4,12 @@ Standard supervised FT baseline evaluation for SSD-VLM.
 
 import argparse
 import logging
-from typing import Dict
-
-import yaml
 
 from eval_ovo_bench import OVOBenchEvaluator
 
+from ssd_vlm.utils.config import load_config
+
 logger = logging.getLogger(__name__)
-
-
-def load_config(config_path: str) -> Dict:
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
 
 
 def main():

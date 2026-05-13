@@ -647,20 +647,14 @@ class TestOVOBenchEvaluatorLogic(unittest.TestCase):
             json.dump(annotations, f)
 
     def test_extract_choice(self):
-        """답안 추출 로직 검증."""
-        # 모델 로딩 없이 메서드만 테스트
-        with patch("transformers.AutoProcessor.from_pretrained"), \
-             patch("transformers.AutoModelForImageTextToText.from_pretrained"):
-            from eval.eval_ovo_bench import OVOBenchEvaluator
-            evaluator = OVOBenchEvaluator.__new__(OVOBenchEvaluator)
-            evaluator.lock_tasks = {"OCR", "ATR", "OJR", "STU", "ACR", "FPD"}
-            evaluator.fork_tasks = {"EPM", "ASI", "HLD"}
+        """답안 추출 로직 검증 (canonical: ssd_vlm.simplestream.extract_choice)."""
+        from ssd_vlm.simplestream import extract_choice
 
-            self.assertEqual(evaluator._extract_choice("A is correct"), 0)
-            self.assertEqual(evaluator._extract_choice("The answer is B"), 1)
-            self.assertEqual(evaluator._extract_choice("Option C"), 2)
-            self.assertEqual(evaluator._extract_choice("D"), 3)
-            self.assertIsNone(evaluator._extract_choice(""))
+        self.assertEqual(extract_choice("A is correct"), 0)
+        self.assertEqual(extract_choice("The answer is B"), 1)
+        self.assertEqual(extract_choice("Option C"), 2)
+        self.assertEqual(extract_choice("D"), 3)
+        self.assertIsNone(extract_choice(""))
 
     def test_load_ovo_dataset(self):
         """OVO 데이터셋 로딩 검증."""
@@ -743,36 +737,32 @@ class TestSSDSampleGeneratorLogic(unittest.TestCase):
     """SSDSampleGenerator의 프롬프트 포맷 로직 검증."""
 
     def test_format_prompt(self):
-        with patch("transformers.AutoProcessor.from_pretrained"), \
-             patch("transformers.AutoModelForImageTextToText.from_pretrained"):
-            from ssd_vlm.sampling.generate_samples import SSDSampleGenerator
-            gen = SSDSampleGenerator.__new__(SSDSampleGenerator)
+        # SSD samples use the canonical SimpleStream prompt shape.
+        from ssd_vlm.simplestream import format_ovo_prompt
 
-            prompt = gen._format_prompt(
-                question="What is happening?",
-                options=["Running", "Jumping", "Walking", "Sitting"],
-            )
-            self.assertIn("What is happening?", prompt)
-            self.assertIn("A: Running", prompt)
-            self.assertIn("B: Jumping", prompt)
-            self.assertIn("C: Walking", prompt)
-            self.assertIn("D: Sitting", prompt)
-            self.assertIn("Answer:", prompt)
+        prompt = format_ovo_prompt(
+            task_type="OCR",
+            question="What is happening?",
+            options=["Running", "Jumping", "Walking", "Sitting"],
+        )
+        self.assertIn("What is happening?", prompt)
+        self.assertIn("A. Running", prompt)
+        self.assertIn("B. Jumping", prompt)
+        self.assertIn("C. Walking", prompt)
+        self.assertIn("D. Sitting", prompt)
+        self.assertIn("Only give the best option's letter directly.", prompt)
 
     def test_format_prompt_option_count(self):
-        with patch("transformers.AutoProcessor.from_pretrained"), \
-             patch("transformers.AutoModelForImageTextToText.from_pretrained"):
-            from ssd_vlm.sampling.generate_samples import SSDSampleGenerator
-            gen = SSDSampleGenerator.__new__(SSDSampleGenerator)
+        from ssd_vlm.simplestream import format_ovo_prompt
 
-            # 2-choice 질문도 처리 가능해야 함
-            prompt = gen._format_prompt(
-                question="Yes or No?",
-                options=["Yes", "No"],
-            )
-            self.assertIn("A: Yes", prompt)
-            self.assertIn("B: No", prompt)
-            self.assertNotIn("C:", prompt)
+        prompt = format_ovo_prompt(
+            task_type="OCR",
+            question="Yes or No?",
+            options=["Yes", "No"],
+        )
+        self.assertIn("A. Yes", prompt)
+        self.assertIn("B. No", prompt)
+        self.assertNotIn("C.", prompt)
 
 
 # ─────────────────────────────────────────────

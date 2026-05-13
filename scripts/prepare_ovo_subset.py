@@ -14,10 +14,11 @@ from collections import Counter, defaultdict
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List
 
-
-BACKWARD_TASKS = {"EPM", "ASI", "HLD"}
-REALTIME_TASKS = {"OCR", "ACR", "ATR", "STU", "FPD", "OJR"}
-FORWARD_TASKS = {"REC", "SSR", "CRR"}
+from ssd_vlm.simplestream import (
+    BACKWARD_TASK_SET as BACKWARD_TASKS,
+    FORWARD_TASK_SET as FORWARD_TASKS,
+    REAL_TIME_TASK_SET as REALTIME_TASKS,
+)
 
 
 def source_name(annotation: Dict[str, Any]) -> str:

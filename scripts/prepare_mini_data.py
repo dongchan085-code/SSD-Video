@@ -196,11 +196,12 @@ def _create_synthetic_pt_data(pt_path: Path, num_samples: int = 10):
 
 # ── OVO-Bench adapter ────────────────────────────────────────────────
 
-# Task taxonomy
-LOCK_TASKS = {"OCR", "ATR", "OJR", "STU", "ACR", "FPD"}
-FORK_TASKS = {"EPM", "ASI", "HLD"}
-# Only Backward and Real-Time tasks are MC format
-MC_TASKS = LOCK_TASKS | FORK_TASKS
+# Task taxonomy (canonical: ssd_vlm.simplestream)
+from ssd_vlm.simplestream import (
+    BACKWARD_TASK_SET as FORK_TASKS,
+    MULTIPLE_CHOICE_TASKS as MC_TASKS,
+    REAL_TIME_TASK_SET as LOCK_TASKS,
+)
 
 
 def convert_ovo_bench(ovo_dir: str, max_samples: int = 10):
