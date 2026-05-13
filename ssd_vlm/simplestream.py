@@ -19,6 +19,34 @@ MC_DIRECTIVE = "Only give the best option's letter directly."
 REC_DIRECTIVE = "Only answer with a number."
 YES_NO_DIRECTIVE = "Only answer Yes or No."
 
+# Official OVO-Bench prompt templates (mirrored from JoeLeelyf/ovo-bench/constant.py).
+# These are used so per-task numbers can be compared against the published
+# leaderboard without prompt-format confounds.
+REC_PROMPT_TEMPLATE = (
+    "You're watching a video in which people may perform a certain type of action repetively. "
+    "The person performing this kind of action are referred to as 'they' in the following statement.\n"
+    "You're task is to count how many times have different people in the video perform this kind of action in total.\n"
+    "One complete motion counts as one.\n"
+    "Now, answer the following question: {question}\n"
+    "Provide your answer as a single number (e.g., 0, 1, 2, 3) indicating the total count.\n"
+    "Do not include any additional text or explanation in your response."
+)
+SSR_PROMPT_TEMPLATE = (
+    "You're watching a tutorial video which contain a sequential of steps.\n"
+    "The following is one step from the whole procedures:\n{step}\n"
+    "Your task is to determine if the man or woman in the video is currently performing this step.\n"
+    "Answer only with \"Yes\" or \"No\".\n"
+    "Do not include any additional text or explanation in your response."
+)
+CRR_PROMPT_TEMPLATE = (
+    "You're responsible of answering questions based on the video content.\n"
+    "The following question are relevant to the latest frames, i.e. the end of the video.\n{question}\n"
+    "Decide whether existing visual content, especially latest frames, i.e. frames that near the end of the video, "
+    "provide enough information for answering the question.\n"
+    "Answer only with \"Yes\" or \"No\".\n"
+    "Do not include any additional text or explanation in your response."
+)
+
 
 def task_group(task_type: str) -> str:
     if task_type in BACKWARD_TASK_SET:
@@ -44,9 +72,11 @@ def format_ovo_prompt(task_type: str, question: str, options: Optional[List[Any]
             f"{MC_DIRECTIVE}"
         )
     if task_type == "REC":
-        return f"{question}\n{REC_DIRECTIVE}"
-    if task_type in {"SSR", "CRR"}:
-        return f"{question}\n{YES_NO_DIRECTIVE}"
+        return REC_PROMPT_TEMPLATE.format(question=question)
+    if task_type == "SSR":
+        return SSR_PROMPT_TEMPLATE.format(step=question)
+    if task_type == "CRR":
+        return CRR_PROMPT_TEMPLATE.format(question=question)
     if options:
         return (
             f"{question}\n"

@@ -31,6 +31,31 @@ BACKWARD_TASKS = BACKWARD_TASK_SET
 FORWARD_TASKS = FORWARD_TASK_SET
 
 
+def _forward_question_and_gt(task_type, annotation, test_info, fallback_question):
+    """Build the per-sample question text and ground truth for OVO forward tasks.
+
+    Mirrors the prompt construction and gt extraction from the official
+    ovo-bench/utils/OVOBench.py + OVOBenchScore.py:
+      - REC: question is "How many times did they {activity}?", gt is the
+        integer `count` from test_info.
+      - SSR: question is the `step` (the prompt template adds the framing);
+        gt is bool derived from `type` (1 -> True/Yes, 0 -> False/No).
+      - CRR: question is the annotation-level `question`; gt is bool from
+        the same `type` convention.
+    """
+    if task_type == "REC":
+        activity = annotation.get("activity") or ""
+        question = f"How many times did they {activity}?" if activity else fallback_question
+        return question, int(test_info.get("count", 0))
+    if task_type == "SSR":
+        step = test_info.get("step", "") or fallback_question
+        return step, bool(int(test_info.get("type", 0)) == 1)
+    if task_type == "CRR":
+        question = annotation.get("question") or fallback_question
+        return question, bool(int(test_info.get("type", 0)) == 1)
+    return fallback_question, test_info.get("gt", test_info.get("answer_idx", 0))
+
+
 class OVOBenchDataset(Dataset):
     """OVO-Bench dataset with on-demand frame loading."""
 
@@ -108,23 +133,28 @@ class OVOBenchDataset(Dataset):
 
             if task_type in FORWARD_TASKS and isinstance(annotation.get("test_info"), list):
                 for index, test_info in enumerate(annotation["test_info"]):
-                    test_question = test_info.get("question", question)
-                    test_options = test_info.get("options", options)
                     video_relpath = test_info.get(
                         "video_relpath",
                         self._chunked_relpath(f"{video_id}_{index}.mp4"),
                     )
-                    self.samples.append({
+                    forward_q, forward_gt = _forward_question_and_gt(
+                        task_type=task_type,
+                        annotation=annotation,
+                        test_info=test_info,
+                        fallback_question=question,
+                    )
+                    sample = {
                         "video_id": f"{video_id}_{index}",
                         "source_id": video_id,
-                        "question": test_question,
-                        "options": test_options,
-                        "answer_idx": test_info.get("gt", test_info.get("answer_idx", 0)),
+                        "question": forward_q,
+                        "options": test_info.get("options", options),
+                        "answer_idx": forward_gt,
                         "task_type": task_type,
                         "video_relpath": video_relpath,
                         "pure_memory": False,
                         "ovo_split": task_group(task_type),
-                    })
+                    }
+                    self.samples.append(sample)
                 continue
 
             video_relpath = annotation.get("video_relpath", self._chunked_relpath(f"{video_id}.mp4"))
