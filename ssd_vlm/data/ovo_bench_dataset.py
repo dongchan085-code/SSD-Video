@@ -95,7 +95,7 @@ class OVOBenchDataset(Dataset):
         return has_memory_cue and not has_leakage_cue
 
     def _load_native_simplestream_annotations(self, anno_path: Path) -> None:
-        with open(anno_path, "r") as f:
+        with open(anno_path, "r", encoding="utf-8") as f:
             annotations = json.load(f)
 
         for annotation in annotations:
@@ -149,9 +149,9 @@ class OVOBenchDataset(Dataset):
                 f"or legacy {split_file.name}/{annotations_file.name}"
             )
 
-        with open(split_file, "r") as f:
+        with open(split_file, "r", encoding="utf-8") as f:
             split_data = json.load(f)
-        with open(annotations_file, "r") as f:
+        with open(annotations_file, "r", encoding="utf-8") as f:
             annotations = json.load(f)
 
         for video_id in split_data.get("video_ids", []):
