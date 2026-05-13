@@ -157,6 +157,148 @@ python figures/plot_all.py \
   --output_dir ./figures/outputs
 ```
 
+## OVO-Bench Benchmark Scripts (Single-GPU T4)
+
+Tooling for running the OVO-Bench evaluation against `Qwen3-VL-8B-Instruct` on a
+single 16 GB GPU (e.g. Tesla T4). The pipeline downloads the public dataset,
+extracts a stratified subset, chunks the videos with ffmpeg stream-copy, runs
+inference with NF4 quantization + SDPA + video temporal-pack, and provides
+helpers to compare against the published OVO-Bench paper numbers.
+
+### Pre-requisites
+
+```bash
+# Conda env with torch, transformers, qwen-vl-utils, bitsandbytes, imageio-ffmpeg, etc.
+conda activate env_ssd_simplestream     # name used in the snippets below
+
+# All large artifacts (OVO videos, model weights) go to D:\ to keep C:\ free.
+# Set HF_HOME so the model lands on D:\ not the default user cache.
+export HF_HOME=D:/hf_cache
+export HUGGINGFACE_HUB_CACHE=D:/hf_cache/hub
+export PYTHONPATH=.                     # the scripts import from ssd_vlm/
+export PYTHONIOENCODING=utf-8           # avoids cp949 errors on Windows
+```
+
+### 1. Download OVO-Bench source tar parts (~43 GB)
+
+```bash
+python -u scripts/download_ovo_sources.py \
+  --data_root D:/ssd_video_data \
+  --parts_dir D:/ssd_video_data/ovo_src_parts \
+  --anno_path D:/ssd_video_data/ovo_bench_new.json \
+  --max_gb 100
+```
+
+Pulls `src_videos.tar.part*` from the HF dataset `JoeLeelyf/OVO-Bench` plus the
+GitHub `ovo_bench_new.json` annotation file. Use `--skip_parts` to only refresh
+the annotation when iterating.
+
+### 2. Stratified subset manifest
+
+```bash
+# 10% stratified-per-task sample (recommended for quick local benchmarking)
+python -u scripts/prepare_ovo_subset.py \
+  --anno_path D:/ssd_video_data/ovo_bench_new.json \
+  --output_dir D:/ssd_video_data/ovo_subset_10pct \
+  --ratio 0.10 --seed 42 --min_per_task 1
+```
+
+Writes `ovo_bench_subset.json`, `required_sources.txt`, `required_chunks.txt`,
+and `subset_report.json` (task / split / query-unit counts). Pass `--ratio 1.0`
+for the full benchmark, or filter the annotation upstream for a single-task
+sweep (see `tests/compare_paper.py` for an HLD-only example).
+
+### 3. Extract only the required source videos from the tar stream
+
+```bash
+python -u scripts/extract_ovo_src_subset.py \
+  --parts_dir D:/ssd_video_data/ovo_src_parts \
+  --required_sources D:/ssd_video_data/ovo_subset_10pct/required_sources.txt \
+  --output_dir D:/ssd_video_data/ovo_subset_10pct/src_videos
+```
+
+Streams the multi-part tar once (~170 MB/s end to end). The script reports
+progress every GB and verifies every required filename was found.
+
+### 4. Chunk videos to per-question end-times (ffmpeg stream-copy)
+
+```bash
+python -u scripts/chunk_ovo_subset.py \
+  --anno_path D:/ssd_video_data/ovo_subset_10pct/ovo_bench_subset.json \
+  --src_dir D:/ssd_video_data/ovo_subset_10pct/src_videos \
+  --output_dir D:/ssd_video_data/ovo_subset_10pct/chunked_videos
+```
+
+Default path uses the `imageio-ffmpeg` bundled binary with `-c copy` — ~50x
+faster than re-encoding (1.5 min for 301 chunks vs ~70 min with OpenCV). Pass
+`--reencode` to force the OpenCV path when stream-copy is incompatible with the
+source codec.
+
+### 5. Run the benchmark
+
+```bash
+mkdir -p results/ovo_10pct
+
+python -u eval/eval_ovo_bench.py \
+  --config configs/eval_ovo_base_10pct_t4.yaml \
+  --model_path Qwen/Qwen3-VL-8B-Instruct \
+  --data_path D:/ssd_video_data/ovo_subset_10pct \
+  --output_file ./results/ovo_10pct/qwen3vl8b_nf4_t4.json
+```
+
+The T4-targeted config sets `dtype: float16`, `device_map: cuda`,
+`load_in_4bit: true`, `attn_implementation: sdpa`, `max_pixels: 200704`,
+`max_new_tokens: 64`, `batch_size: 1`. Peak VRAM is ~6.6 GB on 16 GB T4, no
+CPU offload. The script writes both the aggregate JSON and a per-sample
+JSONL (`.partial_predictions.jsonl`) so an interrupted run can be resumed —
+delete that file when changing the dataset loader or prompts.
+
+Related configs:
+
+| File | Purpose |
+|---|---|
+| `configs/eval_ovo_base_10pct_t4.yaml` | 10% subset eval (recommended) |
+| `configs/eval_ovo_base_1pct_t4.yaml`  | 1% smoke-test eval |
+| `configs/eval_ovo_hld_full_t4.yaml`   | Single-task full HLD eval (186 samples) |
+
+### 6. Analysis helpers
+
+```bash
+# 1% vs 10% (Qwen2VL-2B baseline vs Qwen3VL-8B NF4)
+python tests/compare_subsets.py
+
+# Per-task delta vs the OVO-Bench paper Table 1 leaderboard
+PYTHONIOENCODING=utf-8 python tests/compare_paper.py
+
+# Wilson 95% CI per task — distinguishes sampling noise from true gaps
+PYTHONIOENCODING=utf-8 python tests/analyze_variance.py
+```
+
+`tests/analyze_variance.py` reports per-task Wilson 95% CIs and tells you
+whether the paper number lies inside the CI (i.e. is the gap noise or
+real?). On the 10% subset only HLD remains statistically distinguishable
+from the paper Qwen2-VL-7B; the rest are noise-equivalent at N=11–73.
+
+### GPU smoke test (no full eval)
+
+```bash
+python tests/smoke_oom.py --quant nf4 --gen_tokens 16 --budget_gb 14.5
+```
+
+Loads the NF4 model, runs a text-only generate, then a 4-frame synthetic
+video generate, and aborts if peak VRAM exceeds the budget.
+
+### Known caveats on a single T4
+
+- `Qwen2-VL-7B` paper numbers used **bf16 + 64 frames**; this pipeline uses
+  **NF4 + 4 frames** so the cross-comparison is only fair for the lock and
+  forward macro-averages. HLD specifically is ~33 pp below paper on the
+  full 186-sample run — currently attributed to NF4 logit noise (see
+  `tests/analyze_variance.py` for the CI proof that this gap is real and
+  not a sampling artifact).
+- D:\ on Azure VMs is a **temporary disk**. After a VM stop/start the OVO
+  tar parts and the model cache are gone and step 1 has to be repeated.
+
 ## Running the Full Pipeline
 
 Execute end-to-end training and evaluation:

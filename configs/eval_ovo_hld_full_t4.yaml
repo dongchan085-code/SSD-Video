@@ -1,0 +1,53 @@
+# OVO-Bench HLD-only full eval on a single T4 (16GB) with Qwen3-VL-8B NF4
+# Used to verify the -24.5pp HLD gap vs paper on a larger N (186 samples).
+
+model:
+  model_id: Qwen/Qwen3-VL-8B-Instruct
+  dtype: float16
+  device_map: cuda
+  load_in_8bit: false
+  load_in_4bit: true
+  attn_implementation: sdpa
+  max_pixels: 200704
+  min_pixels: 3136
+
+inference:
+  num_frames: 4
+  recent_frames_only: 4
+  chunk_duration: 1.0
+  fps: 1.0
+  frame_sampling_strategy: recent
+  resize_shortest_edge: 224
+  max_new_tokens: 64
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 1
+  do_sample: false
+  use_cache: true
+
+data:
+  dataset_name: ovo_bench
+  data_path: D:/ssd_video_data/ovo_hld_full
+  anno_path: D:/ssd_video_data/ovo_hld_full/ovo_bench_subset.json
+  chunked_dir: D:/ssd_video_data/ovo_hld_full/chunked_videos
+  split: test
+  batch_size: 1
+  num_workers: 2
+
+evaluation:
+  metrics:
+    - accuracy
+    - per_task_accuracy
+    - lock_fork_split
+  save_predictions: true
+  output_format: json
+  save_detailed_results: true
+  partial_predictions_file: ./results/ovo_hld_full/qwen3vl8b_nf4_t4.partial_predictions.jsonl
+
+logging:
+  log_level: INFO
+  log_interval: 20
+
+hardware:
+  cuda_visible_devices: 0
+  seed: 42
