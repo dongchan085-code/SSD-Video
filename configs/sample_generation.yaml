@@ -1,15 +1,10 @@
-# SSD Sample Generation Configuration
-# Generates high-temperature completions from frozen Qwen3-VL-8B-Instruct
+# SSD Sample Generation Configuration.
+# Generates high-temperature completions from frozen Qwen3-VL-8B-Instruct.
+
+extends: _t4_nf4_sdpa.yaml
 
 model:
   model_id: Qwen/Qwen3-VL-8B-Instruct
-  dtype: float16              # T4(Turing) has no bf16 tensor cores
-  device_map: cuda            # single-GPU pin, no silent CPU split
-  load_in_8bit: false
-  load_in_4bit: true          # NF4 ~6GB weights, fits 16GB T4 with KV cache headroom
-  attn_implementation: sdpa   # T4 cannot run flash-attention-2
-  max_pixels: 200704          # 256 * 28 * 28 — cap vision tokens
-  min_pixels: 3136            # 4 * 28 * 28
 
 generation:
   temperature: 1.5
@@ -23,7 +18,7 @@ data:
   dataset_name: perception_test
   split: train
   data_path: ./data/perception_test
-  
+
   # Video frame sampling
   num_frames: 4
   recent_frames_only: 4
@@ -31,7 +26,7 @@ data:
   fps: 1.0
   frame_sampling_strategy: recent
   resize_shortest_edge: 224
-  
+
   # Memory skill oversampling
   memory_skill_oversample_ratio: 2.0
   skill_categories_file: ./configs/skill_categories.json
@@ -42,7 +37,7 @@ training:
   num_workers: 8
   pin_memory: true
   prefetch_factor: 2
-  
+
   # Performance
   mixed_precision: bf16
   gradient_checkpointing: false

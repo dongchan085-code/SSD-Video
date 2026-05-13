@@ -1,55 +1,12 @@
 # OVO-Bench Evaluation Configuration - SSD Model
-# Evaluates fine-tuned SSD-VLM on OVO-Bench with 4-frame budget
+# Inherits eval_ovo_base.yaml; only the LoRA-merged-specific bits differ.
+
+extends: eval_ovo_base.yaml
 
 model:
   model_path: ./outputs/lora_checkpoint/merged
-  dtype: float16              # T4 has no bf16 tensor cores
-  device_map: cuda
-  load_in_8bit: false
-  load_in_4bit: true          # NF4 fits 16GB T4
-  attn_implementation: sdpa   # FA2 unsupported on Turing
-  max_pixels: 200704          # 256 * 28 * 28
-  min_pixels: 3136            # 4 * 28 * 28
   use_lora: false
   is_merged: true
 
-inference:
-  num_frames: 4
-  recent_frames_only: 4
-  chunk_duration: 1.0
-  fps: 1.0
-  frame_sampling_strategy: recent
-  resize_shortest_edge: 224
-  max_new_tokens: 64
-  temperature: 1.0
-  top_p: 1.0
-  top_k: 1
-  do_sample: false
-  use_cache: true
-
-data:
-  dataset_name: ovo_bench
-  data_path: ./data/ovo_bench
-  anno_path: ./data/ovo_bench/ovo_bench_new.json
-  chunked_dir: ./data/ovo_bench/chunked_videos
-  split: test
-  batch_size: 1
-  num_workers: 2
-
 evaluation:
-  metrics:
-    - accuracy
-    - per_task_accuracy
-    - lock_fork_split
-  save_predictions: true
-  output_format: json
-  save_detailed_results: true
   compare_with_base: true
-
-logging:
-  log_level: INFO
-  log_interval: 10
-
-hardware:
-  cuda_visible_devices: 0
-  seed: 42

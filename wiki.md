@@ -13,6 +13,10 @@ ssd_vlm/
 ├── __init__.py                      # lazy exports: PerceptionTestDataset, SSDSampleDataset
 ├── model_loading.py                 # load_vlm_processor_and_model(), quant+attn+pixel-cap logic
 ├── simplestream.py                  # OVO prompt formatting, scoring, task groups (LOCK/FORK)
+├── eval_metrics.py                  # summarize_ovo_predictions() — aggregation logic split out of eval_ovo_bench.py
+├── utils/
+│   ├── __init__.py                  # re-exports load_config
+│   └── config.py                    # load_config() with extends: deep-merge
 ├── sampling/
 │   └── generate_samples.py          # Stage 1 entry — SSDSampleGenerator class
 ├── training/
@@ -139,10 +143,13 @@ Resolved (P1):
 
 Outstanding:
 - `train_lora.py` and `train_full_ft.py` share ~70% of the epoch loop.
-- `eval_ovo_base.yaml` ≈ `eval_ovo_ssd.yaml` (2 fields differ).
-- Recent NF4/SDPA fix (commit `fa26e50`) scattered quantization knobs across `model_loading.py` + several configs without a single `QuantizationProfile`.
 - `configs/ablations/*.yaml` exist but `run_ablations.sh` doesn't consume them all.
 - `tests/compare_1pct.py` and `configs/eval_ovo_base_1pct_t4.yaml` are untracked WIP from a T4/1%-subset experiment.
+
+Resolved (P2):
+- ~~`eval_ovo_base.yaml` ≈ `eval_ovo_ssd.yaml`~~ → `extends:` deep-merge in `load_config`; SSD config is now a 12-line leaf.
+- ~~T4 quantization block repeated across configs~~ → `configs/_t4_nf4_sdpa.yaml` is the canonical profile, consumed via `extends:`.
+- ~~`eval/eval_ovo_bench.py` 613 lines / mixed concerns~~ → metrics aggregation extracted to `ssd_vlm/eval_metrics.py:summarize_ovo_predictions`. File is now 428 lines.
 
 ---
 

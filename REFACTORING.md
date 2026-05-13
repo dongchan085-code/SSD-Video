@@ -20,7 +20,10 @@ Cross-reference: `wiki.md` (file-level inventory). Items below are ordered by RO
 | R2 | done | All paths now call `simplestream.format_ovo_prompt`. **Behavior changed**: SSD sample-generation prompts switched from `Question:/Options:/Answer:` shape to the canonical SimpleStream MC shape (`A.`/`B.` + directive). Previously, sampling and eval used different prompts — now unified. |
 | R3 | done | `OVOBenchEvaluator._extract_choice` removed; `simplestream.extract_choice` used everywhere |
 | R4 | done | `simplestream.py` is the single source; `scripts/prepare_*` imports the canonical sets |
-| R5–R12 | pending | see priorities below |
+| R5 | done | `extends:` deep-merge in `load_config`; `eval_ovo_ssd.yaml` → `eval_ovo_base.yaml`. Chained extends supported. |
+| R8 | done (partial) | Metrics aggregation pulled into `ssd_vlm/eval_metrics.py:summarize_ovo_predictions`; `eval/eval_ovo_bench.py` 545 → 428 lines. Kept the class in-place so sweep scripts' `from eval_ovo_bench import …` still works. |
+| R9 | done | YAML profile `configs/_t4_nf4_sdpa.yaml`; `eval_ovo_base.yaml` and `sample_generation.yaml` extend it. Chose YAML inheritance over a Python `QuantizationProfile` module because the duplication was config-side, not Python. |
+| R6, R7, R10–R12 | pending | see priorities below |
 
 ## Priority 1 — High-ROI deduplication (do first)
 

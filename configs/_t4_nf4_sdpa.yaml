@@ -1,0 +1,17 @@
+# T4 (16GB Turing) quantization profile.
+# - float16 because Turing lacks bf16 tensor cores
+# - NF4 weights (~6GB) leave headroom for the KV cache
+# - sdpa attention because flash-attention-2 requires Ampere+
+# - max/min_pixels cap vision tokens (256/4 * 28 * 28)
+#
+# Pulled in via `extends: _t4_nf4_sdpa.yaml` so the 7-field block doesn't
+# drift across sample_generation/eval/ablation configs.
+
+model:
+  dtype: float16
+  device_map: cuda
+  load_in_8bit: false
+  load_in_4bit: true
+  attn_implementation: sdpa
+  max_pixels: 200704
+  min_pixels: 3136

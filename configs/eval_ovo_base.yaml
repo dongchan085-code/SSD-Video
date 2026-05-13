@@ -1,15 +1,10 @@
 # OVO-Bench Evaluation Configuration - Base Model
-# Evaluates Qwen3-VL-8B-Instruct on OVO-Bench with 4-frame budget
+# Evaluates Qwen3-VL-8B-Instruct on OVO-Bench with 4-frame budget.
+
+extends: _t4_nf4_sdpa.yaml
 
 model:
   model_id: Qwen/Qwen3-VL-8B-Instruct
-  dtype: float16              # T4 has no bf16 tensor cores
-  device_map: cuda
-  load_in_8bit: false
-  load_in_4bit: true          # NF4 fits 16GB T4
-  attn_implementation: sdpa   # FA2 unsupported on Turing
-  max_pixels: 200704          # 256 * 28 * 28
-  min_pixels: 3136            # 4 * 28 * 28
 
 inference:
   num_frames: 4

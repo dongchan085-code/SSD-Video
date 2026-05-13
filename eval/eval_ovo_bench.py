@@ -11,21 +11,13 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-import numpy as np
 import torch
 from tqdm import tqdm
 
 from ssd_vlm.data.ovo_bench_dataset import FORK_TASKS, LOCK_TASKS, OVOBenchDataset
+from ssd_vlm.eval_metrics import summarize_ovo_predictions
 from ssd_vlm.model_loading import load_vlm_processor_and_model
-from ssd_vlm.simplestream import (
-    BACKWARD_TASK_SET,
-    FORWARD_TASK_SET,
-    REAL_TIME_TASK_SET,
-    aggregate_group_accuracy,
-    format_ovo_prompt,
-    prediction_to_simplestream_record,
-    score_prediction,
-)
+from ssd_vlm.simplestream import format_ovo_prompt, score_prediction
 from ssd_vlm.utils.config import load_config
 
 logger = logging.getLogger(__name__)
@@ -306,138 +298,29 @@ class OVOBenchEvaluator:
             if partial_handle:
                 partial_handle.close()
 
-        correct = sum(1 for prediction in predictions if prediction["correct"])
-        total = len(predictions)
-        task_results = {}
-        for prediction in predictions:
-            task_type = prediction.get("task_type", "unknown")
-            if task_type not in task_results:
-                task_results[task_type] = {"correct": 0, "total": 0}
-            task_results[task_type]["correct"] += int(bool(prediction["correct"]))
-            task_results[task_type]["total"] += 1
-        
-        # Compute metrics
-        accuracy = correct / total if total > 0 else 0.0
-        
-        # Per-task accuracy
-        per_task_accuracy = {}
-        for task_type, results in task_results.items():
-            acc = results["correct"] / results["total"] if results["total"] > 0 else 0.0
-            per_task_accuracy[task_type] = acc
-        
-        # Lock vs Fork split
-        lock_correct = sum(results["correct"] for task, results in task_results.items() 
-                          if task in self.lock_tasks)
-        lock_total = sum(results["total"] for task, results in task_results.items() 
-                        if task in self.lock_tasks)
-        lock_accuracy = lock_correct / lock_total if lock_total > 0 else 0.0
-        
-        fork_correct = sum(results["correct"] for task, results in task_results.items() 
-                          if task in self.fork_tasks)
-        fork_total = sum(results["total"] for task, results in task_results.items() 
-                        if task in self.fork_tasks)
-        fork_accuracy = fork_correct / fork_total if fork_total > 0 else 0.0
-
-        realtime_correct = sum(results["correct"] for task, results in task_results.items()
-                               if task in REAL_TIME_TASK_SET)
-        realtime_total = sum(results["total"] for task, results in task_results.items()
-                             if task in REAL_TIME_TASK_SET)
-        realtime_accuracy = realtime_correct / realtime_total if realtime_total > 0 else 0.0
-
-        backward_correct = sum(results["correct"] for task, results in task_results.items()
-                               if task in BACKWARD_TASK_SET)
-        backward_total = sum(results["total"] for task, results in task_results.items()
-                             if task in BACKWARD_TASK_SET)
-        backward_accuracy = backward_correct / backward_total if backward_total > 0 else 0.0
-
-        forward_correct = sum(results["correct"] for task, results in task_results.items()
-                              if task in FORWARD_TASK_SET)
-        forward_total = sum(results["total"] for task, results in task_results.items()
-                            if task in FORWARD_TASK_SET)
-        forward_accuracy = forward_correct / forward_total if forward_total > 0 else None
-        
-        latencies = [p["latency_ms"] for p in predictions]
-        mean_lat = float(np.mean(latencies)) if latencies else 0.0
-
-        pure_memory_correct = sum(
-            1 for p in predictions if p.get("pure_memory") and p["correct"]
+        peak_gpu_memory_gb = (
+            torch.cuda.max_memory_allocated() / 1e9
+            if torch.cuda.is_available() else None
         )
-        pure_memory_total = sum(
-            1 for p in predictions if p.get("pure_memory")
-        )
-
-        simple_predictions = {
-            "backward": [
-                prediction_to_simplestream_record(p)
-                for p in predictions if p.get("ovo_split") == "backward"
-            ],
-            "realtime": [
-                prediction_to_simplestream_record(p)
-                for p in predictions if p.get("ovo_split") == "realtime"
-            ],
-            "forward": [
-                prediction_to_simplestream_record(p)
-                for p in predictions if p.get("ovo_split") == "forward"
-            ],
-        }
-        rt_bwd_values = [
-            value for value in [
-                aggregate_group_accuracy(predictions, "realtime"),
-                aggregate_group_accuracy(predictions, "backward"),
-            ]
-            if value is not None
-        ]
-        three_way_values = [
-            value for value in [
-                aggregate_group_accuracy(predictions, "realtime"),
-                aggregate_group_accuracy(predictions, "backward"),
-                aggregate_group_accuracy(predictions, "forward"),
-            ]
-            if value is not None
-        ]
-
-        results = {
-            "overall_accuracy": accuracy,
-            "num_correct": correct,
-            "num_total": total,
-            "per_task_accuracy": per_task_accuracy,
-            "lock_accuracy": lock_accuracy,
-            "fork_accuracy": fork_accuracy,
-            "realtime_accuracy": realtime_accuracy,
-            "backward_accuracy": backward_accuracy,
-            "forward_accuracy": forward_accuracy,
-            "rt_bwd_avg": float(np.mean(rt_bwd_values)) if rt_bwd_values else accuracy,
-            "ovo_total_avg_3way": float(np.mean(three_way_values)) if three_way_values else accuracy,
-            "ovo_avg": float(np.mean(rt_bwd_values)) if rt_bwd_values else accuracy,
-            "mean_latency_ms": mean_lat,
-            "p50_latency_ms": float(np.percentile(latencies, 50)) if latencies else 0.0,
-            "p95_latency_ms": float(np.percentile(latencies, 95)) if latencies else 0.0,
-            "p99_latency_ms": float(np.percentile(latencies, 99)) if latencies else 0.0,
-            "throughput_samples_per_sec": float(1000.0 / mean_lat) if mean_lat > 0 else 0.0,
-            "peak_gpu_memory_gb": (
-                torch.cuda.max_memory_allocated() / 1e9
-                if torch.cuda.is_available() else None
-            ),
-            "pure_memory_accuracy": (
-                pure_memory_correct / pure_memory_total
-                if pure_memory_total > 0 else None
-            ),
-            "pure_memory_n": pure_memory_total,
-            "decoding": {
+        results = summarize_ovo_predictions(
+            predictions,
+            lock_tasks=self.lock_tasks,
+            fork_tasks=self.fork_tasks,
+            decoding_meta={
                 "temperature": temperature,
                 "top_k": top_k,
                 "top_p": top_p,
                 "do_sample": do_sample,
                 "use_cache": self.use_cache,
             },
-            "streaming": {
+            streaming_meta={
                 "recent_frames_only": self.recent_frames_only,
                 "chunk_duration": self.chunk_duration,
                 "fps": self.fps,
             },
-            "simplestream": simple_predictions,
-            "predictions": predictions if save_predictions else None,
-        }
+            save_predictions=save_predictions,
+            peak_gpu_memory_gb=peak_gpu_memory_gb,
+        )
         
         # Save results
         if output_file:
