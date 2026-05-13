@@ -24,7 +24,7 @@ ssd_vlm/
 │   ├── train_full_ft.py             # Stage 2 ablation — full FT (ZeRO-3)
 │   └── utils.py                     # CosineWarmupScheduler, save_checkpoint, log_model_info
 └── data/
-    ├── __init__.py                  # exports OVOBenchDataset, SSDSampleDataset, create_*_dataloader(s)
+    ├── __init__.py                  # exports OVOBenchDataset, SSDSampleDataset, SSD sample dataloader helpers
     ├── perception_test_dataset.py   # train-split loader, 4-frame uniform, 2× memory oversample
     ├── ssd_sample_dataset.py        # JSONL replay loader for LoRA training
     ├── ovo_bench_dataset.py         # OVO-Bench test loader with frame cache
@@ -40,8 +40,9 @@ ssd_vlm/
 | `load_vlm_processor_and_model(...)` | `ssd_vlm/model_loading.py` | sampling, training, all eval scripts |
 | `is_peft_adapter_path(...)` | `ssd_vlm/model_loading.py` | model loading (LoRA vs merged) |
 | `format_ovo_prompt(task_type, question, options)` | `ssd_vlm/simplestream.py` | eval, sampling, entropy analysis |
-| `extract_choice(text, options)` / `score_prediction(...)` | `ssd_vlm/simplestream.py` | eval_ovo_bench, sweeps |
-| `task_group(task_type)`, `LOCK_TASKS`/`FORK_TASKS` | `ssd_vlm/simplestream.py` | eval, datasets |
+| `extract_choice(text)` / `score_prediction(...)` | `ssd_vlm/simplestream.py` | eval_ovo_bench, sweeps |
+| `task_group(task_type)`, `BACKWARD_TASKS`/`REAL_TIME_TASKS`/`FORWARD_TASKS` | `ssd_vlm/simplestream.py` | eval, datasets, prep scripts |
+| `LOCK_TASKS`/`FORK_TASKS` aliases | `ssd_vlm/data/ovo_bench_dataset.py` | OVO eval and entropy scripts |
 | `CosineWarmupScheduler`, `save_checkpoint`, `log_model_info` | `ssd_vlm/training/utils.py` | both trainers |
 | `load_video_frames_dual` (one-pass tensor+PIL), `load_video_frames`, `load_video_frame_images`, `build_frame_transform` | `ssd_vlm/data/video_utils.py` | all three dataset classes |
 | `create_ssd_sample_dataloader(s)` | `ssd_vlm/data/ssd_sample_dataset.py` | `train_lora.py`, `train_full_ft.py` |
@@ -87,7 +88,8 @@ JSONL is written incrementally (every 100 batches) — survives interruption. Fr
 | `eval/statistical_tests.py` | significance | — |
 | `figures/plot_all.py` | viz orchestrator | — |
 | `figures/plot_*.py` (8 scripts) | viz | — |
-| `scripts/prepare_mini_data.py` / `prepare_ovo_subset.py` / `chunk_ovo_subset.py` / `extract_ovo_src_subset.py` / `download_ovo_sources.py` | data prep | — |
+| `scripts/download_data.sh` / `download_mini_data.sh` / `download_ovo_sources.py` | data download | — |
+| `scripts/prepare_mini_data.py` / `prepare_ovo_subset.py` / `chunk_ovo_subset.py` / `extract_ovo_src_subset.py` | data prep | — |
 | `scripts/smoke_qwen8b_load.py` | preflight | — |
 
 PowerShell variants: `scripts/prepare_ovo_subset_pipeline.ps1`, `scripts/run_simplestream_baseline.ps1`.
@@ -127,7 +129,7 @@ No `pytest.ini`/`conftest.py`/`pyproject.toml`. Coverage gaps: **no test exercis
 
 ## Packaging
 
-`setup.py`: package `ssd-vlm` v0.1.0. Deps: `transformers≥4.51`, `peft≥0.11`, `deepspeed≥0.14`, `pydantic`, `pyyaml`, `opencv-python`, `Pillow`, `tqdm`, `accelerate`. Extras: `dev` (pytest, black, isort, flake8), `viz` (matplotlib, seaborn). **Torch/torchvision/torchaudio NOT in requirements** — server has them pre-installed. No console-script entry points; everything runs via `python <path>` or `torchrun`.
+`setup.py`: package `ssd-vlm` v0.1.0. Install deps: `transformers≥4.51`, `peft≥0.11`, `deepspeed≥0.14`, `pydantic`, `pyyaml`, `numpy`, `opencv-python-headless`, `Pillow`, `tqdm`, `accelerate`. `requirements.txt` adds experiment/dev packages such as `qwen-vl-utils`, `datasets`, `bitsandbytes`, `safetensors`, `pandas`, `scipy`, `scikit-learn`, plotting, notebook, and lint/test tools. Extras: `dev` (pytest, pytest-cov, black, isort, flake8), `viz` (matplotlib, seaborn). **Torch/torchvision/torchaudio NOT in requirements** — server has them pre-installed. No console-script entry points; everything runs via `python <path>` or `torchrun`.
 
 ---
 
@@ -144,7 +146,7 @@ Resolved (P1):
 Outstanding:
 - `train_lora.py` and `train_full_ft.py` share ~70% of the epoch loop.
 - `configs/ablations/*.yaml` exist but `run_ablations.sh` doesn't consume them all.
-- `tests/compare_1pct.py` and `configs/eval_ovo_base_1pct_t4.yaml` are untracked WIP from a T4/1%-subset experiment.
+- `tests/compare_1pct.py` and `configs/eval_ovo_base_{1,10}pct_t4.yaml` are untracked WIP from a T4 subset experiment.
 
 Resolved (P2):
 - ~~`eval_ovo_base.yaml` ≈ `eval_ovo_ssd.yaml`~~ → `extends:` deep-merge in `load_config`; SSD config is now a 12-line leaf.
