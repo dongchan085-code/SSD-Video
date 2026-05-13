@@ -46,6 +46,7 @@ class OVOBenchEvaluator:
         chunk_duration: float = 1.0,
         fps: float = 1.0,
         use_cache: bool = True,
+        use_simplestream_decode: bool = False,
     ):
         """
         Initialize OVO-Bench evaluator.
@@ -68,6 +69,7 @@ class OVOBenchEvaluator:
         self.chunk_duration = chunk_duration
         self.fps = fps
         self.use_cache = use_cache
+        self.use_simplestream_decode = bool(use_simplestream_decode)
 
         logger.info(f"Loading model from: {model_path}")
         self.processor, self.model = load_vlm_processor_and_model(
@@ -118,6 +120,7 @@ class OVOBenchEvaluator:
             recent_frames_only=self.recent_frames_only,
             chunk_duration=self.chunk_duration,
             fps=self.fps,
+            use_simplestream_decode=self.use_simplestream_decode,
         )
     
     @torch.no_grad()
@@ -146,17 +149,21 @@ class OVOBenchEvaluator:
             Generated text
         """
         prompt = format_ovo_prompt(task_type, question, options)
-        
-        # Prepare input — pass as a video item so Qwen3-VL temporal-packs the frames.
+
+        # Match SimpleStream/Qwen3-VL: feed each chunk's frames as separate image
+        # entries (no `{type: video}` temporal pack). The temporal pack halves
+        # vision tokens via temporal_patch_size=2 and degrades per-task accuracy
+        # vs. the per-frame baseline reported in the SimpleStream paper.
         if isinstance(frames, list):
-            video_content = [{"type": "video", "video": frames}]
+            frame_iter = frames
         else:
-            video_content = [{"type": "video", "video": [frames]}]
+            frame_iter = [frames]
+        image_content = [{"type": "image", "image": frame} for frame in frame_iter]
 
         messages = [
             {
                 "role": "user",
-                "content": video_content + [{"type": "text", "text": prompt}],
+                "content": image_content + [{"type": "text", "text": prompt}],
             }
         ]
         
@@ -385,6 +392,7 @@ def main():
         chunk_duration=config["inference"].get("chunk_duration", 1.0),
         fps=config["inference"].get("fps", 1.0),
         use_cache=config["inference"].get("use_cache", True),
+        use_simplestream_decode=config["inference"].get("use_simplestream_decode", False),
     )
     
     # Load dataset

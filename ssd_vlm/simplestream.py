@@ -15,36 +15,27 @@ REAL_TIME_TASK_SET = set(REAL_TIME_TASKS)
 FORWARD_TASK_SET = set(FORWARD_TASKS)
 MULTIPLE_CHOICE_TASKS = BACKWARD_TASK_SET | REAL_TIME_TASK_SET
 
-MC_DIRECTIVE = "Only give the best option's letter directly."
-REC_DIRECTIVE = "Only answer with a number."
-YES_NO_DIRECTIVE = "Only answer Yes or No."
-
-# Official OVO-Bench prompt templates (mirrored from JoeLeelyf/ovo-bench/constant.py).
-# These are used so per-task numbers can be compared against the published
-# leaderboard without prompt-format confounds.
+# Prompt templates verbatim from EvolvingLMMs-Lab/SimpleStream/ovo_constants.py.
+# Reproducing the SimpleStream Qwen3-VL + 4f result requires bit-for-bit prompt
+# parity — substituting OVO-Bench's longer prompts changes wording the model
+# was tested against and shifts per-task accuracy by several points.
+BR_PROMPT_TEMPLATE = (
+    "{question}\n"
+    "Options: {options}\n"
+    "Only give the best option's letter directly."
+)
 REC_PROMPT_TEMPLATE = (
-    "You're watching a video in which people may perform a certain type of action repetively. "
-    "The person performing this kind of action are referred to as 'they' in the following statement.\n"
-    "You're task is to count how many times have different people in the video perform this kind of action in total.\n"
-    "One complete motion counts as one.\n"
-    "Now, answer the following question: {question}\n"
-    "Provide your answer as a single number (e.g., 0, 1, 2, 3) indicating the total count.\n"
-    "Do not include any additional text or explanation in your response."
+    "{question}\n"
+    "Only give a number as answer."
 )
 SSR_PROMPT_TEMPLATE = (
-    "You're watching a tutorial video which contain a sequential of steps.\n"
-    "The following is one step from the whole procedures:\n{step}\n"
-    "Your task is to determine if the man or woman in the video is currently performing this step.\n"
-    "Answer only with \"Yes\" or \"No\".\n"
-    "Do not include any additional text or explanation in your response."
+    "Is this person performing the tutorial step: {step}\n"
+    "Answer Yes or No only."
 )
 CRR_PROMPT_TEMPLATE = (
-    "You're responsible of answering questions based on the video content.\n"
-    "The following question are relevant to the latest frames, i.e. the end of the video.\n{question}\n"
-    "Decide whether existing visual content, especially latest frames, i.e. frames that near the end of the video, "
-    "provide enough information for answering the question.\n"
-    "Answer only with \"Yes\" or \"No\".\n"
-    "Do not include any additional text or explanation in your response."
+    "{question}\n"
+    "Is there enough information in the provided video to answer the question? "
+    "Answer Yes or No only."
 )
 
 
@@ -59,18 +50,15 @@ def task_group(task_type: str) -> str:
 
 
 def format_options(options: Iterable[Any]) -> str:
-    return "\n".join(f"{chr(65 + i)}. {option}" for i, option in enumerate(options))
+    """Format BR options as SimpleStream does: `A. opt; B. opt; ...;` (single line)."""
+    return "; ".join(f"{chr(65 + i)}. {option}" for i, option in enumerate(options)) + ";"
 
 
 def format_ovo_prompt(task_type: str, question: str, options: Optional[List[Any]] = None) -> str:
     """Return the prompt shape used by the SimpleStream OVO evaluator."""
     options = options or []
     if task_type in MULTIPLE_CHOICE_TASKS:
-        return (
-            f"{question}\n"
-            f"{format_options(options)}\n"
-            f"{MC_DIRECTIVE}"
-        )
+        return BR_PROMPT_TEMPLATE.format(question=question, options=format_options(options))
     if task_type == "REC":
         return REC_PROMPT_TEMPLATE.format(question=question)
     if task_type == "SSR":
@@ -78,48 +66,60 @@ def format_ovo_prompt(task_type: str, question: str, options: Optional[List[Any]
     if task_type == "CRR":
         return CRR_PROMPT_TEMPLATE.format(question=question)
     if options:
-        return (
-            f"{question}\n"
-            f"{format_options(options)}\n"
-            f"{MC_DIRECTIVE}"
-        )
+        return BR_PROMPT_TEMPLATE.format(question=question, options=format_options(options))
     return question
 
 
-def extract_choice(text: str) -> Optional[int]:
-    """Extract a 0-based multiple-choice answer from generated text."""
-    text_stripped = text.strip()
-    text_upper = text_stripped.upper()
+def extract_mcq_answer(response: Optional[str]) -> Optional[str]:
+    """Mirror SimpleStream/ovo_constants.extract_br_answer.
 
-    patterns = [
-        r"ANSWER\s*(?:IS|:|=)?\s*([A-D])\b",
-        r"OPTION\s*([A-D])\b",
-        r"^([A-D])[\.\)\s:]",
-        r"[\(\[]\s*([A-D])\s*[\)\]]",
-        r"\b([A-D])\b",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text_upper)
-        if match:
-            return ord(match.group(1)) - ord("A")
-
-    match = re.search(r"\b([0-3])\b", text_stripped)
-    if match:
-        return int(match.group(1))
+    Returns a letter 'A'..'D' or None. Falls back to 1..4 -> A..D mapping.
+    """
+    if response is None or not str(response).strip():
+        return None
+    text = str(response).strip().upper()
+    m = re.search(r"\b([A-D])\b", text)
+    if m:
+        return m.group(1)
+    m = re.search(r"\b([1-4])\b", text)
+    if m:
+        return chr(64 + int(m.group(1)))
     return None
 
 
-def extract_number(text: str) -> Optional[float]:
-    match = re.search(r"-?\d+(?:\.\d+)?", text.replace(",", ""))
-    return float(match.group(0)) if match else None
+def extract_choice(text: str) -> Optional[int]:
+    """0-based letter index (A->0..D->3). Wraps extract_mcq_answer for compat."""
+    letter = extract_mcq_answer(text)
+    return None if letter is None else ord(letter) - ord("A")
+
+
+def extract_number(text: str) -> Optional[int]:
+    """Mirror SimpleStream/ovo_constants.score_rec digit concatenation.
+
+    SimpleStream joins all digit runs into one int (so "1, 2 times" -> 12).
+    We return that joined int (or None when no digits exist) — score_prediction
+    handles the equality check against the integer ground truth.
+    """
+    if text is None or not str(text).strip():
+        return None
+    nums = re.findall(r"\d+", str(text))
+    if not nums:
+        return None
+    try:
+        return int("".join(nums))
+    except ValueError:
+        return None
 
 
 def extract_yes_no(text: str) -> Optional[bool]:
-    lowered = text.strip().lower()
-    if re.search(r"\byes\b", lowered):
-        return True
-    if re.search(r"\bno\b", lowered):
+    """Mirror SimpleStream's score_yesno substring rule."""
+    if text is None or not str(text).strip():
+        return None
+    s = str(text).strip().upper()
+    if s == "N" or "NO" in s:
         return False
+    if s == "Y" or "YES" in s:
+        return True
     return None
 
 
@@ -152,7 +152,7 @@ def score_prediction(task_type: str, generated_text: str, ground_truth: Any) -> 
         if pred is None:
             return {"predicted": None, "ground_truth": gt, "correct": False}
         try:
-            correct = float(pred) == float(gt)
+            correct = int(pred) == int(gt)
         except (TypeError, ValueError):
             correct = False
         return {"predicted": pred, "ground_truth": gt, "correct": correct}

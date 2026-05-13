@@ -73,6 +73,7 @@ class OVOBenchDataset(Dataset):
         recent_frames_only: Optional[int] = None,
         chunk_duration: float = 1.0,
         fps: float = 1.0,
+        use_simplestream_decode: bool = False,
     ):
         self.data_path = Path(data_path)
         self.split = split
@@ -83,6 +84,7 @@ class OVOBenchDataset(Dataset):
         self.recent_frames_only = recent_frames_only or num_frames
         self.chunk_duration = chunk_duration
         self.fps = fps
+        self.use_simplestream_decode = bool(use_simplestream_decode)
         self.chunked_dir = Path(chunked_dir) if chunked_dir else self.data_path / "chunked_videos"
         self.cache_dir = Path(cache_dir) if cache_dir else self.data_path / ".frame_cache"
         if self.enable_cache:
@@ -212,18 +214,22 @@ class OVOBenchDataset(Dataset):
             video_id=sample["video_id"],
             video_relpath=sample.get("video_relpath"),
         )
+        # SimpleStream decode skips our resize so the official Qwen-VL aware
+        # preprocessing in the processor matches the published baseline.
+        pil_resize = None if self.use_simplestream_decode else self.resize_shortest_edge
         frames, frame_images, frame_indices, total_frames, frame_timestamps, chunk_ids = (
             load_video_frames_dual(
                 video_path=video_path,
                 num_frames=self.num_frames,
                 tensor_resize_shortest_edge=self.resize_shortest_edge,
-                pil_resize_shortest_edge=self.resize_shortest_edge,
+                pil_resize_shortest_edge=pil_resize,
                 frame_sampling_strategy=self.frame_sampling_strategy,
                 cache_dir=self.cache_dir,
                 enable_cache=self.enable_cache,
                 recent_frames_only=self.recent_frames_only,
                 chunk_duration=self.chunk_duration,
                 fps=self.fps,
+                use_simplestream_decode=self.use_simplestream_decode,
             )
         )
         sample.update({

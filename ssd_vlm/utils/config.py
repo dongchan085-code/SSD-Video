@@ -31,7 +31,7 @@ def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[st
 def load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
     """Load a YAML config file, resolving an optional ``extends:`` chain."""
     path = Path(config_path)
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
 
     if not isinstance(cfg, dict):

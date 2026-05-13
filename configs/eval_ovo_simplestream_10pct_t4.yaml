@@ -1,0 +1,58 @@
+# OVO-Bench 10% subset, SimpleStream-aligned setup on a 16GB T4.
+# Reproduces the published Qwen3-VL + 4f result as closely as a single 16GB
+# GPU allows. Deltas from the SimpleStream release:
+#   - load_in_8bit instead of bf16 (T4 cannot hold a 16GB bf16 model + KV)
+#   - attn_implementation: sdpa (T4 sm_75 has no FA2)
+# Everything else (prompts, scoring, frame encoding, decode pipeline, max_new_tokens)
+# matches EvolvingLMMs-Lab/SimpleStream main_experiments/eval_qwen3vl_ovo.py.
+
+model:
+  model_id: Qwen/Qwen3-VL-8B-Instruct
+  dtype: float16
+  device_map: cuda
+  load_in_8bit: true
+  load_in_4bit: false
+  attn_implementation: sdpa
+  # No max_pixels / min_pixels — SimpleStream uses Qwen3-VL processor defaults.
+
+inference:
+  num_frames: 4
+  recent_frames_only: 4
+  chunk_duration: 1.0
+  fps: 1.0
+  frame_sampling_strategy: simplestream
+  resize_shortest_edge: 224
+  max_new_tokens: 256
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 1
+  do_sample: false
+  use_cache: true
+  use_simplestream_decode: true
+
+data:
+  dataset_name: ovo_bench
+  data_path: D:/ssd_video_data/ovo_subset_10pct
+  anno_path: D:/ssd_video_data/ovo_subset_10pct/ovo_bench_subset.json
+  chunked_dir: D:/ssd_video_data/ovo_subset_10pct/chunked_videos
+  split: test
+  batch_size: 1
+  num_workers: 2
+
+evaluation:
+  metrics:
+    - accuracy
+    - per_task_accuracy
+    - lock_fork_split
+  save_predictions: true
+  output_format: json
+  save_detailed_results: true
+  partial_predictions_file: ./results/ovo_10pct/qwen3vl8b_simplestream_int8_t4.partial_predictions.jsonl
+
+logging:
+  log_level: INFO
+  log_interval: 20
+
+hardware:
+  cuda_visible_devices: 0
+  seed: 42

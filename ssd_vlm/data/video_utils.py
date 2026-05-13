@@ -268,6 +268,89 @@ def load_video_frames(
     return torch.stack(sampled_frames, dim=0), indices, total_frames
 
 
+def _fetch_simplestream_frames(
+    video_path: Path,
+    chunk_duration: float,
+    fps: float,
+    recent_frames_only: int,
+    resize_shortest_edge: Optional[int],
+) -> Tuple[List[PILImage.Image], List[int], int, List[float], List[int]]:
+    """SimpleStream-aligned decode: qwen_vl_utils.fetch_video then chunk-by-time.
+
+    Mirrors lib/recent_window_eval.decode_video_to_chunks_qwen in the
+    EvolvingLMMs-Lab/SimpleStream release: decode once at the requested FPS,
+    bucket frames into ``chunk_duration``-second windows, keep the last N
+    chunks, then return all frames inside them. This is what the published
+    Qwen3-VL recent-window scores were computed against.
+
+    When ``chunk_duration * fps == 1.0`` we use the SimpleStream exact-recent
+    decoder so only the final N tail frames are read off disk. fetch_video
+    otherwise decodes the entire clip at the requested fps and OOMs the CPU
+    on long OVO-Bench chunks (1-3 min @ 1080p ~ 6+ GB).
+    """
+    from qwen_vl_utils.vision_process import fetch_video  # local import; optional dep
+
+    use_exact = abs(float(chunk_duration) * float(fps) - 1.0) < 1e-6
+    video_req = {"video": str(video_path), "fps": float(fps)}
+    if use_exact:
+        from ssd_vlm.data.qwen_exact_recent_decoder import fetch_recent_video_exact
+
+        video, metadata = fetch_recent_video_exact(
+            video_req,
+            last_nframes=int(recent_frames_only),
+            return_video_metadata=True,
+        )
+    else:
+        video, metadata = fetch_video(video_req, return_video_metadata=True)
+    if not isinstance(video, torch.Tensor) or video.ndim != 4:
+        raise ValueError(f"Unexpected qwen_vl_utils output for video={video_path!r}")
+
+    meta = metadata if isinstance(metadata, dict) else {}
+    raw_fps = max(float(meta.get("fps", fps if fps > 0 else 1.0)), 1e-6)
+    frame_indices_meta = meta.get("frames_indices")
+    if isinstance(frame_indices_meta, torch.Tensor):
+        frame_indices_meta = frame_indices_meta.detach().cpu().reshape(-1).tolist()
+    elif frame_indices_meta is not None and not isinstance(frame_indices_meta, (list, tuple)):
+        try:
+            frame_indices_meta = list(frame_indices_meta)
+        except TypeError:
+            frame_indices_meta = None
+    if frame_indices_meta is None or len(frame_indices_meta) != int(video.shape[0]):
+        frame_indices_meta = list(range(int(video.shape[0])))
+    frame_indices_meta = [int(x) for x in frame_indices_meta]
+
+    # Bucket frames by chunk index (timestamp // chunk_duration).
+    chunk = max(float(chunk_duration), 1e-6)
+    buckets: dict[int, List[Tuple[PILImage.Image, float, int]]] = {}
+    for i, idx in enumerate(frame_indices_meta):
+        ts = float(idx) / raw_fps
+        chunk_idx = int(ts // chunk)
+        arr = video[i].clamp(0, 255).to(torch.uint8).permute(1, 2, 0).cpu().numpy()
+        image = PILImage.fromarray(arr)
+        image = _resize_pil_shortest_edge(image, resize_shortest_edge)
+        buckets.setdefault(chunk_idx, []).append((image, ts, idx))
+    del video
+
+    # Keep the last N chunks (by chunk_idx).
+    sorted_chunk_ids = sorted(buckets)
+    window_size = max(1, int(recent_frames_only))
+    recent_ids = sorted_chunk_ids[-window_size:]
+
+    pil_frames: List[PILImage.Image] = []
+    timestamps: List[float] = []
+    selected_indices: List[int] = []
+    chunk_ids: List[int] = []
+    for cid in recent_ids:
+        for image, ts, idx in buckets[cid]:
+            pil_frames.append(image)
+            timestamps.append(ts)
+            selected_indices.append(idx)
+            chunk_ids.append(cid)
+
+    total_frames = int(len(frame_indices_meta))
+    return pil_frames, selected_indices, total_frames, timestamps, chunk_ids
+
+
 def load_video_frames_dual(
     video_path: Path,
     num_frames: int,
@@ -281,6 +364,7 @@ def load_video_frames_dual(
     recent_frames_only: Optional[int] = None,
     chunk_duration: float = 1.0,
     fps: float = 1.0,
+    use_simplestream_decode: bool = False,
 ) -> Tuple[torch.Tensor, List[PILImage.Image], List[int], int, List[float], List[int]]:
     """
     One-pass loader returning both preprocessed tensor frames and raw PIL frames.
@@ -289,20 +373,35 @@ def load_video_frames_dual(
     ``load_video_frames`` back-to-back per item; that decoded each video twice
     (or hit the frame cache twice). This helper samples and decodes once.
 
+    When ``use_simplestream_decode`` is True, switches to the SimpleStream
+    decode path (qwen_vl_utils.fetch_video at the requested FPS, bucket by
+    chunk_duration seconds, keep last ``recent_frames_only`` chunks). This is
+    the path required to reproduce the published SimpleStream Qwen3-VL 4f
+    numbers.
+
     Returns: (tensor, pil_frames, indices, total_frames, timestamps, chunk_ids).
     """
-    pil_frames, indices, total_frames, timestamps, chunk_ids = load_video_frame_images(
-        video_path=video_path,
-        num_frames=num_frames,
-        frame_sampling_strategy=frame_sampling_strategy,
-        resize_shortest_edge=pil_resize_shortest_edge,
-        cache_dir=cache_dir,
-        enable_cache=enable_cache,
-        frame_indices=frame_indices,
-        recent_frames_only=recent_frames_only,
-        chunk_duration=chunk_duration,
-        fps=fps,
-    )
+    if use_simplestream_decode:
+        pil_frames, indices, total_frames, timestamps, chunk_ids = _fetch_simplestream_frames(
+            video_path=video_path,
+            chunk_duration=chunk_duration,
+            fps=fps,
+            recent_frames_only=int(recent_frames_only or num_frames),
+            resize_shortest_edge=pil_resize_shortest_edge,
+        )
+    else:
+        pil_frames, indices, total_frames, timestamps, chunk_ids = load_video_frame_images(
+            video_path=video_path,
+            num_frames=num_frames,
+            frame_sampling_strategy=frame_sampling_strategy,
+            resize_shortest_edge=pil_resize_shortest_edge,
+            cache_dir=cache_dir,
+            enable_cache=enable_cache,
+            frame_indices=frame_indices,
+            recent_frames_only=recent_frames_only,
+            chunk_duration=chunk_duration,
+            fps=fps,
+        )
     transform = build_frame_transform(tensor_resize_shortest_edge)
     tensor = torch.stack([transform(frame) for frame in pil_frames], dim=0)
     return tensor, pil_frames, indices, total_frames, timestamps, chunk_ids
