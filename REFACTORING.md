@@ -23,7 +23,9 @@ Cross-reference: `wiki.md` (file-level inventory). Items below are ordered by RO
 | R5 | done | `extends:` deep-merge in `load_config`; `eval_ovo_ssd.yaml` → `eval_ovo_base.yaml`. Chained extends supported. |
 | R8 | done (partial) | Metrics aggregation pulled into `ssd_vlm/eval_metrics.py:summarize_ovo_predictions`; `eval/eval_ovo_bench.py` 545 → 428 lines. Kept the class in-place so sweep scripts' `from eval_ovo_bench import …` still works. |
 | R9 | done | YAML profile `configs/_t4_nf4_sdpa.yaml`; `eval_ovo_base.yaml` and `sample_generation.yaml` extend it. Chose YAML inheritance over a Python `QuantizationProfile` module because the duplication was config-side, not Python. |
-| R6, R7, R10–R12 | pending | see priorities below |
+| R7 | done | `video_utils.load_video_frames_dual` decodes once and returns both tensor + PIL frames. The 3 dataset classes (`OVOBenchDataset`, `SSDSampleDataset`, `PerceptionTestDataset`) now decode each video once per item instead of twice. |
+| R6 | deferred | Skipped for now — trainer code can't be validated without GPU; FullFTTrainer is ablation-only so risk/reward unfavorable until P3. |
+| R10–R12 | pending | see priorities below |
 
 ## Priority 1 — High-ROI deduplication (do first)
 

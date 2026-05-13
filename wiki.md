@@ -28,7 +28,7 @@ ssd_vlm/
     ├── perception_test_dataset.py   # train-split loader, 4-frame uniform, 2× memory oversample
     ├── ssd_sample_dataset.py        # JSONL replay loader for LoRA training
     ├── ovo_bench_dataset.py         # OVO-Bench test loader with frame cache
-    └── video_utils.py               # load_video_frames(), load_video_frame_images(), build_frame_transform()
+    └── video_utils.py               # load_video_frames_dual() / load_video_frames() / load_video_frame_images() / build_frame_transform()
 ```
 
 **Important path correction**: CLAUDE.md mentions `ssd_vlm/training/utils/model_loading.py` — actual location is `ssd_vlm/model_loading.py` (top-level), and `ssd_vlm/training/utils.py` is a single file (not a package).
@@ -43,7 +43,7 @@ ssd_vlm/
 | `extract_choice(text, options)` / `score_prediction(...)` | `ssd_vlm/simplestream.py` | eval_ovo_bench, sweeps |
 | `task_group(task_type)`, `LOCK_TASKS`/`FORK_TASKS` | `ssd_vlm/simplestream.py` | eval, datasets |
 | `CosineWarmupScheduler`, `save_checkpoint`, `log_model_info` | `ssd_vlm/training/utils.py` | both trainers |
-| `load_video_frames`, `load_video_frame_images`, `build_frame_transform` | `ssd_vlm/data/video_utils.py` | all three dataset classes |
+| `load_video_frames_dual` (one-pass tensor+PIL), `load_video_frames`, `load_video_frame_images`, `build_frame_transform` | `ssd_vlm/data/video_utils.py` | all three dataset classes |
 | `create_ssd_sample_dataloader(s)` | `ssd_vlm/data/ssd_sample_dataset.py` | `train_lora.py`, `train_full_ft.py` |
 | `apply_style()` | `figures/style.py` | every plot script |
 
@@ -150,6 +150,7 @@ Resolved (P2):
 - ~~`eval_ovo_base.yaml` ≈ `eval_ovo_ssd.yaml`~~ → `extends:` deep-merge in `load_config`; SSD config is now a 12-line leaf.
 - ~~T4 quantization block repeated across configs~~ → `configs/_t4_nf4_sdpa.yaml` is the canonical profile, consumed via `extends:`.
 - ~~`eval/eval_ovo_bench.py` 613 lines / mixed concerns~~ → metrics aggregation extracted to `ssd_vlm/eval_metrics.py:summarize_ovo_predictions`. File is now 428 lines.
+- ~~Datasets decoded each video twice~~ → `load_video_frames_dual` returns both tensor and PIL frames in one pass; all 3 dataset classes use it.
 
 ---
 

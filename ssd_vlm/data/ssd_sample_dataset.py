@@ -15,8 +15,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset, random_split
 
 from ssd_vlm.data.video_utils import (
-    load_video_frame_images,
-    load_video_frames,
+    load_video_frames_dual,
     resolve_video_path,
 )
 
@@ -130,32 +129,23 @@ class SSDSampleDataset(Dataset):
         prompt, completion = self._get_prompt_completion(sample, idx)
         data_root, video_path = self._resolve_video(sample)
         cache_dir = self.cache_dir or (data_root / ".frame_cache")
-        frame_images, frame_indices, total_frames, frame_timestamps, chunk_ids = load_video_frame_images(
-            video_path=video_path,
-            num_frames=sample.get("num_frames", self.num_frames),
-            frame_sampling_strategy=sample.get(
-                "frame_sampling_strategy",
-                self.frame_sampling_strategy,
-            ),
-            resize_shortest_edge=None,
-            cache_dir=cache_dir,
-            enable_cache=self.enable_cache,
-            frame_indices=sample.get("frame_indices"),
-            recent_frames_only=sample.get("recent_frames_only"),
-            chunk_duration=sample.get("chunk_duration", 1.0),
-            fps=sample.get("fps", 1.0),
-        )
-        frames, _, _ = load_video_frames(
-            video_path=video_path,
-            num_frames=sample.get("num_frames", self.num_frames),
-            frame_sampling_strategy=sample.get(
-                "frame_sampling_strategy",
-                self.frame_sampling_strategy,
-            ),
-            resize_shortest_edge=self.resize_shortest_edge,
-            cache_dir=cache_dir,
-            enable_cache=self.enable_cache,
-            frame_indices=sample.get("frame_indices"),
+        frames, frame_images, frame_indices, total_frames, frame_timestamps, chunk_ids = (
+            load_video_frames_dual(
+                video_path=video_path,
+                num_frames=sample.get("num_frames", self.num_frames),
+                tensor_resize_shortest_edge=self.resize_shortest_edge,
+                pil_resize_shortest_edge=None,
+                frame_sampling_strategy=sample.get(
+                    "frame_sampling_strategy",
+                    self.frame_sampling_strategy,
+                ),
+                cache_dir=cache_dir,
+                enable_cache=self.enable_cache,
+                frame_indices=sample.get("frame_indices"),
+                recent_frames_only=sample.get("recent_frames_only"),
+                chunk_duration=sample.get("chunk_duration", 1.0),
+                fps=sample.get("fps", 1.0),
+            )
         )
         return {
             "frames": frames,

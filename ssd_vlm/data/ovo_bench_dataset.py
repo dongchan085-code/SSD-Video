@@ -11,8 +11,7 @@ from typing import Any, Dict, Optional
 from torch.utils.data import Dataset
 
 from ssd_vlm.data.video_utils import (
-    load_video_frame_images,
-    load_video_frames,
+    load_video_frames_dual,
     resolve_video_path,
 )
 from ssd_vlm.simplestream import (
@@ -183,25 +182,19 @@ class OVOBenchDataset(Dataset):
             video_id=sample["video_id"],
             video_relpath=sample.get("video_relpath"),
         )
-        frame_images, frame_indices, total_frames, frame_timestamps, chunk_ids = load_video_frame_images(
-            video_path=video_path,
-            num_frames=self.num_frames,
-            frame_sampling_strategy=self.frame_sampling_strategy,
-            resize_shortest_edge=self.resize_shortest_edge,
-            cache_dir=self.cache_dir,
-            enable_cache=self.enable_cache,
-            recent_frames_only=self.recent_frames_only,
-            chunk_duration=self.chunk_duration,
-            fps=self.fps,
-        )
-        frames, _, _ = load_video_frames(
-            video_path=video_path,
-            num_frames=self.num_frames,
-            frame_sampling_strategy=self.frame_sampling_strategy,
-            resize_shortest_edge=self.resize_shortest_edge,
-            cache_dir=self.cache_dir,
-            enable_cache=self.enable_cache,
-            frame_indices=frame_indices,
+        frames, frame_images, frame_indices, total_frames, frame_timestamps, chunk_ids = (
+            load_video_frames_dual(
+                video_path=video_path,
+                num_frames=self.num_frames,
+                tensor_resize_shortest_edge=self.resize_shortest_edge,
+                pil_resize_shortest_edge=self.resize_shortest_edge,
+                frame_sampling_strategy=self.frame_sampling_strategy,
+                cache_dir=self.cache_dir,
+                enable_cache=self.enable_cache,
+                recent_frames_only=self.recent_frames_only,
+                chunk_duration=self.chunk_duration,
+                fps=self.fps,
+            )
         )
         sample.update({
             "frames": frames,

@@ -268,6 +268,46 @@ def load_video_frames(
     return torch.stack(sampled_frames, dim=0), indices, total_frames
 
 
+def load_video_frames_dual(
+    video_path: Path,
+    num_frames: int,
+    *,
+    tensor_resize_shortest_edge: int = 224,
+    pil_resize_shortest_edge: Optional[int] = None,
+    frame_sampling_strategy: str = "uniform",
+    cache_dir: Optional[Path] = None,
+    enable_cache: bool = True,
+    frame_indices: Optional[List[int]] = None,
+    recent_frames_only: Optional[int] = None,
+    chunk_duration: float = 1.0,
+    fps: float = 1.0,
+) -> Tuple[torch.Tensor, List[PILImage.Image], List[int], int, List[float], List[int]]:
+    """
+    One-pass loader returning both preprocessed tensor frames and raw PIL frames.
+
+    The dataset classes previously called ``load_video_frame_images`` and
+    ``load_video_frames`` back-to-back per item; that decoded each video twice
+    (or hit the frame cache twice). This helper samples and decodes once.
+
+    Returns: (tensor, pil_frames, indices, total_frames, timestamps, chunk_ids).
+    """
+    pil_frames, indices, total_frames, timestamps, chunk_ids = load_video_frame_images(
+        video_path=video_path,
+        num_frames=num_frames,
+        frame_sampling_strategy=frame_sampling_strategy,
+        resize_shortest_edge=pil_resize_shortest_edge,
+        cache_dir=cache_dir,
+        enable_cache=enable_cache,
+        frame_indices=frame_indices,
+        recent_frames_only=recent_frames_only,
+        chunk_duration=chunk_duration,
+        fps=fps,
+    )
+    transform = build_frame_transform(tensor_resize_shortest_edge)
+    tensor = torch.stack([transform(frame) for frame in pil_frames], dim=0)
+    return tensor, pil_frames, indices, total_frames, timestamps, chunk_ids
+
+
 def resolve_video_path(data_path: Path, video_id: str, video_relpath: Optional[str] = None) -> Path:
     """Resolve a video path from a dataset root plus optional relative path."""
     candidates = []

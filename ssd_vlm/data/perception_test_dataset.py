@@ -13,8 +13,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 from ssd_vlm.data.video_utils import (
-    load_video_frame_images,
-    load_video_frames,
+    load_video_frames_dual,
     resolve_video_path,
 )
 
@@ -161,31 +160,15 @@ class PerceptionTestDataset(Dataset):
                     f"{temporal_oversampled} via temporal heuristic)")
         return samples
     
-    def _get_video_frames(self, video_id: str) -> Tuple[torch.Tensor, List[int], int]:
-        """
-        Load and sample frames from video.
-        
-        Returns:
-            Tuple of preprocessed frame tensor, sampled frame indices, total frame count.
-        """
+    def _load_video_dual(self, video_id: str):
+        """Decode the video once and return both the preprocessed tensor and raw PIL frames."""
         video_path = resolve_video_path(self.data_path, video_id)
-        return load_video_frames(
+        return load_video_frames_dual(
             video_path=video_path,
             num_frames=self.num_frames,
+            tensor_resize_shortest_edge=self.resize_shortest_edge,
+            pil_resize_shortest_edge=None,
             frame_sampling_strategy=self.frame_sampling_strategy,
-            resize_shortest_edge=self.resize_shortest_edge,
-            cache_dir=self.cache_dir,
-            enable_cache=self.enable_cache,
-        )
-
-    def _get_video_images(self, video_id: str):
-        """Load raw PIL frames for the VLM processor path."""
-        video_path = resolve_video_path(self.data_path, video_id)
-        return load_video_frame_images(
-            video_path=video_path,
-            num_frames=self.num_frames,
-            frame_sampling_strategy=self.frame_sampling_strategy,
-            resize_shortest_edge=None,
             cache_dir=self.cache_dir,
             enable_cache=self.enable_cache,
             recent_frames_only=(
@@ -216,11 +199,12 @@ class PerceptionTestDataset(Dataset):
                 - video_id: str
         """
         sample = self.samples[idx]
-        
-        # Load both compatibility tensors and raw PIL images. Qwen-VL training/eval
-        # should use frame_images; frames is retained for lightweight tests.
-        frames_tensor, frame_indices, total_frames = self._get_video_frames(sample["video_id"])
-        frame_images, _, _, frame_timestamps, chunk_ids = self._get_video_images(sample["video_id"])
+
+        # Decode the video once; return both the preprocessed tensor (lightweight tests)
+        # and raw PIL frames (Qwen-VL training/eval).
+        frames_tensor, frame_images, frame_indices, total_frames, frame_timestamps, chunk_ids = (
+            self._load_video_dual(sample["video_id"])
+        )
         
         return {
             "frames": frames_tensor,
