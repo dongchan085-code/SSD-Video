@@ -2,7 +2,7 @@
 
 Compact codebase reference. Loaded alongside `CLAUDE.md` to skip re-exploration on planning tasks. `CLAUDE.md` covers *what* and *why*; this file covers *where*.
 
-Last refreshed: 2026-05-13. If file moves/renames invalidate paths below, refresh by re-running the `/plan` exploration.
+Last refreshed: 2026-05-13 (after SimpleStream Qwen3-VL 4f reproduction work). If file moves/renames invalidate paths below, refresh by re-running the `/plan` exploration.
 
 ---
 
@@ -27,8 +27,9 @@ ssd_vlm/
     ├── __init__.py                  # exports OVOBenchDataset, SSDSampleDataset, SSD sample dataloader helpers
     ├── perception_test_dataset.py   # train-split loader, 4-frame uniform, 2× memory oversample
     ├── ssd_sample_dataset.py        # JSONL replay loader for LoRA training
-    ├── ovo_bench_dataset.py         # OVO-Bench test loader with frame cache
-    └── video_utils.py               # load_video_frames_dual() / load_video_frames() / load_video_frame_images() / build_frame_transform()
+    ├── ovo_bench_dataset.py         # OVO-Bench test loader with frame cache; supports sample_ratio
+    ├── qwen_exact_recent_decoder.py # vendored from EvolvingLMMs-Lab/SimpleStream: decode only the last N tail frames
+    └── video_utils.py               # load_video_frames_dual() (+ use_simplestream_decode flag), _fetch_simplestream_frames(), load_video_frames(), load_video_frame_images()
 ```
 
 **Important path correction**: CLAUDE.md mentions `ssd_vlm/training/utils/model_loading.py` — actual location is `ssd_vlm/model_loading.py` (top-level), and `ssd_vlm/training/utils.py` is a single file (not a package).
@@ -40,15 +41,22 @@ ssd_vlm/
 | `load_vlm_processor_and_model(...)` | `ssd_vlm/model_loading.py` | sampling, training, all eval scripts |
 | `is_peft_adapter_path(...)` | `ssd_vlm/model_loading.py` | model loading (LoRA vs merged) |
 | `format_ovo_prompt(task_type, question, options)` | `ssd_vlm/simplestream.py` | eval, sampling, entropy analysis |
-| `extract_choice(text)` / `score_prediction(...)` | `ssd_vlm/simplestream.py` | eval_ovo_bench, sweeps |
+| `extract_choice(text)` / `extract_mcq_answer(text)` / `extract_number(text)` / `extract_yes_no(text)` / `score_prediction(...)` | `ssd_vlm/simplestream.py` | eval_ovo_bench, sweeps; verbatim SimpleStream substring rules |
+| `BR_PROMPT_TEMPLATE` / `REC_PROMPT_TEMPLATE` / `SSR_PROMPT_TEMPLATE` / `CRR_PROMPT_TEMPLATE` | `ssd_vlm/simplestream.py` | mirrored from EvolvingLMMs-Lab/SimpleStream/ovo_constants.py — required for SimpleStream Qwen3-VL 4f reproduction |
 | `task_group(task_type)`, `BACKWARD_TASKS`/`REAL_TIME_TASKS`/`FORWARD_TASKS` | `ssd_vlm/simplestream.py` | eval, datasets, prep scripts |
 | `LOCK_TASKS`/`FORK_TASKS` aliases | `ssd_vlm/data/ovo_bench_dataset.py` | OVO eval and entropy scripts |
+| `_forward_question_and_gt(task, anno, test_info, fallback)` | `ssd_vlm/data/ovo_bench_dataset.py` | REC/SSR/CRR ground-truth and question construction (count / type→bool / annotation question) |
+| `_stratified_sample(samples, ratio, seed, min_per_task)` | `ssd_vlm/data/ovo_bench_dataset.py` | sample fractions of the dataset at load time without per-ratio subset dirs |
 | `CosineWarmupScheduler`, `save_checkpoint`, `log_model_info` | `ssd_vlm/training/utils.py` | both trainers |
-| `load_video_frames_dual` (one-pass tensor+PIL), `load_video_frames`, `load_video_frame_images`, `build_frame_transform` | `ssd_vlm/data/video_utils.py` | all three dataset classes |
+| `load_video_frames_dual(..., use_simplestream_decode=False)` | `ssd_vlm/data/video_utils.py` | all three dataset classes; flag swaps decode path |
+| `_fetch_simplestream_frames(...)` | `ssd_vlm/data/video_utils.py` | SimpleStream-aligned decode (qwen_vl_utils.fetch_video + chunk-by-time + auto-exact-recent when chunk_duration*fps==1.0) |
+| `fetch_recent_video_exact(ele, last_nframes, ...)` | `ssd_vlm/data/qwen_exact_recent_decoder.py` | tail-only decord/torchcodec decode; avoids CPU OOM on long OVO chunks |
 | `create_ssd_sample_dataloader(s)` | `ssd_vlm/data/ssd_sample_dataset.py` | `train_lora.py`, `train_full_ft.py` |
 | `apply_style()` | `figures/style.py` | every plot script |
 
-Task sets (canonical in `simplestream.py`): `BACKWARD_TASKS=[EPM, ASI, HLD]` (Fork/memory), `REAL_TIME_TASKS=[OCR, ACR, ATR, STU, FPD, OJR]` (Lock/perception), `FORWARD_TASKS=[REC, SSR, CRR]`. `MC_DIRECTIVE`/`REC_DIRECTIVE`/`YES_NO_DIRECTIVE` constants drive prompt formatting.
+Task sets (canonical in `simplestream.py`): `BACKWARD_TASKS=[EPM, ASI, HLD]` (Fork/memory), `REAL_TIME_TASKS=[OCR, ACR, ATR, STU, FPD, OJR]` (Lock/perception), `FORWARD_TASKS=[REC, SSR, CRR]`. Per-task prompt templates `BR_PROMPT_TEMPLATE` / `REC_PROMPT_TEMPLATE` / `SSR_PROMPT_TEMPLATE` / `CRR_PROMPT_TEMPLATE` are copied verbatim from `EvolvingLMMs-Lab/SimpleStream/ovo_constants.py` so eval numbers compare against the published SimpleStream leaderboard.
+
+**Forward-task ground truth** (in `_forward_question_and_gt`): REC uses `test_info[i].count` (int), SSR/CRR use `test_info[i].type` (1→True, 0→False), CRR question text comes from the annotation-level `question`. Default-to-zero for these tasks (the pre-SimpleStream-fix path) silently scored ~0 on REC/SSR for every sample.
 
 ---
 
@@ -106,6 +114,13 @@ PowerShell variants: `scripts/prepare_ovo_subset_pipeline.ps1`, `scripts/run_sim
 
 **Low-resource subsets**: `eval_ovo_subset_{1,10}pct_{base,qwen2vl2b,qwen25vl3b}.yaml`, `eval_ovo_base_{1,10}pct_t4.yaml`.
 
+**T4 SimpleStream-aligned (single-GPU 16GB)**:
+- `eval_ovo_simplestream_10pct_t4.yaml` — int8 + sdpa + image-list encoding + `use_simplestream_decode: true` + `max_new_tokens: 256`. Matches SimpleStream Qwen3-VL 4f to within ~5pp per task on the 10% subset.
+- `eval_ovo_simplestream_10pct_t4_nf4.yaml` — same setup but NF4 instead of int8 (faster, ~7pp HLD accuracy cost).
+- `eval_ovo_hld_full_t4{,_int8}.yaml` — HLD-only full eval (186 samples) to quantify the quantization tax in isolation.
+
+**Subset selection at load time** (no per-ratio directory anymore): `OVOBenchDataset(..., sample_ratio=0.25, sample_seed=42, sample_min_per_task=1)` does stratified-by-task source-grouped sampling. The `eval/eval_ovo_bench.py` CLI exposes `--sample_ratio/--sample_seed/--sample_min_per_task` and the eval config reads `data.sample_ratio` if set. **Forward tasks (REC/SSR/CRR) are sampled at the annotation level** — every chunk of a selected annotation is included so per-source-video accuracy stays well-defined.
+
 **Mini**: `configs/mini/{sample_generation_mini, train_lora_mini, eval_ovo_mini}.yaml`.
 
 **DeepSpeed**: `deepspeed_zero2.json` (LoRA), `deepspeed_zero3.json` (full FT).
@@ -121,7 +136,12 @@ PowerShell variants: `scripts/prepare_ovo_subset_pipeline.ps1`, `scripts/run_sim
 | `tests/smoke_test.py` (~900 lines) | imports, datasets, schedulers, checkpointing, scoring, dataloader iteration, prompt formatting — **mock-only, no GPU** |
 | `tests/test_simplestream.py` | task groups, `format_ovo_prompt`, `score_prediction` |
 | `tests/smoke_oom.py` | real GPU load test for Qwen3-VL-8B at NF4/int8/SDPA, peak VRAM measurement |
-| `tests/compare_1pct.py` | untracked one-off — compares two result JSONs (hardcoded paths under `results/ovo_1pct/`) |
+| `tests/compare_1pct.py` | one-off — compares two result JSONs under `results/ovo_1pct/` (Qwen2VL-2B vs Qwen3VL-8B NF4) |
+| `tests/compare_subsets.py` | 1% vs 10% vs paper comparison helper (aggregate + per-task) |
+| `tests/compare_paper.py` | per-task delta vs OVO-Bench paper Table 1 leaderboard |
+| `tests/compare_simplestream.py` | per-task delta vs SimpleStream Qwen3-VL 4f published numbers (`OCR…OJR` realtime + `EPM/ASI/HLD` backward) |
+| `tests/analyze_variance.py` | Wilson 95% CI per task vs OVO-Bench paper — flags noise-equivalent vs statistically distinguishable |
+| `tests/analyze_simplestream_ci.py` | same but vs SimpleStream paper |
 
 No `pytest.ini`/`conftest.py`/`pyproject.toml`. Coverage gaps: **no test exercises `train_lora.py`, `train_full_ft.py`, or `video_utils.py`**; choice-extraction is tested via re-implementation in `smoke_test.py` (lines 649-780) rather than direct import.
 
@@ -132,6 +152,26 @@ No `pytest.ini`/`conftest.py`/`pyproject.toml`. Coverage gaps: **no test exercis
 `setup.py`: package `ssd-vlm` v0.1.0. Install deps: `transformers≥4.51`, `peft≥0.11`, `deepspeed≥0.14`, `pydantic`, `pyyaml`, `numpy`, `opencv-python-headless`, `Pillow`, `tqdm`, `accelerate`. `requirements.txt` adds experiment/dev packages such as `qwen-vl-utils`, `datasets`, `bitsandbytes`, `safetensors`, `pandas`, `scipy`, `scikit-learn`, plotting, notebook, and lint/test tools. Extras: `dev` (pytest, pytest-cov, black, isort, flake8), `viz` (matplotlib, seaborn). **Torch/torchvision/torchaudio NOT in requirements** — server has them pre-installed. No console-script entry points; everything runs via `python <path>` or `torchrun`.
 
 ---
+
+## OVO-Bench data layout (D:\ on the T4 box)
+
+**D:\ is the Azure VM temporary disk** — wiped on VM stop/start. Re-running `scripts/download_ovo_sources.py` repopulates it. Layout after the SimpleStream-reproduction refactor:
+
+```
+D:\ssd_video_data\
+├── ovo_bench_new.json         # raw HF annotation, 1640 entries
+├── ovo_bench_full.json        # same content, enriched with video_relpath fields
+├── ovo_src_parts\             # 43 GB src_videos.tar.part{aa..ae}, downloaded once
+├── src_videos\                # full extraction: ~644 source videos, ~43 GB
+├── chunked_videos\            # full chunk set, generated on demand by chunk_ovo_subset.py
+├── required_sources.txt       # 644 paths, written by prepare_ovo_subset.py --ratio 1.0
+├── required_chunks.txt        # ~3035 chunk filenames
+└── subset_report.json
+```
+
+**Per-ratio subset directories are gone.** Earlier the pipeline materialised `ovo_subset_1pct/`, `ovo_subset_10pct/`, etc. — each with its own `src_videos\` + `chunked_videos\`. After the dataset-level sampling refactor (`OVOBenchDataset.sample_ratio`) we keep one fullset on D:\ and sample at load time, which saves ~50 GB per ratio and avoids cross-subset drift.
+
+HF model cache lives on D:\ too (`D:\hf_cache\`) via `HF_HOME` env var. **Set `HF_HOME=D:/hf_cache` + `FORCE_QWENVL_VIDEO_READER=decord` + `PYTHONIOENCODING=utf-8` before any eval run** — defaults land model weights on C:\ and torchvision's PyAV reader is broken in this env.
 
 ## Known rough edges
 

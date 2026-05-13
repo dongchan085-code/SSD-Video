@@ -98,17 +98,11 @@ class OVOBenchEvaluator:
         split: str = "test",
         anno_path: Optional[str] = None,
         chunked_dir: Optional[str] = None,
+        sample_ratio: float = 1.0,
+        sample_seed: int = 42,
+        sample_min_per_task: int = 1,
     ) -> OVOBenchDataset:
-        """
-        Load OVO-Bench dataset.
-        
-        Args:
-            data_path: Path to OVO-Bench data directory
-            split: Dataset split (test, val, etc.)
-        
-        Returns:
-            List of test samples
-        """
+        """Load OVO-Bench dataset, optionally taking a stratified fraction."""
         return OVOBenchDataset(
             data_path=data_path,
             split=split,
@@ -121,6 +115,9 @@ class OVOBenchEvaluator:
             chunk_duration=self.chunk_duration,
             fps=self.fps,
             use_simplestream_decode=self.use_simplestream_decode,
+            sample_ratio=sample_ratio,
+            sample_seed=sample_seed,
+            sample_min_per_task=sample_min_per_task,
         )
     
     @torch.no_grad()
@@ -350,7 +347,11 @@ def main():
                        help="Output file for results")
     parser.add_argument("--max_samples", type=int, default=None,
                        help="Optional smoke-test limit after dataset loading")
-    
+    parser.add_argument("--sample_ratio", type=float, default=None,
+                       help="Stratified-by-task fraction of the dataset to evaluate (0..1)")
+    parser.add_argument("--sample_seed", type=int, default=42,
+                       help="Seed for the stratified subset sampler")
+    parser.add_argument("--sample_min_per_task", type=int, default=1)
     args = parser.parse_args()
     
     # Setup logging
@@ -395,12 +396,31 @@ def main():
         use_simplestream_decode=config["inference"].get("use_simplestream_decode", False),
     )
     
+    sample_ratio = (
+        args.sample_ratio
+        if args.sample_ratio is not None
+        else float(config["data"].get("sample_ratio", 1.0))
+    )
+    sample_seed = (
+        args.sample_seed
+        if args.sample_seed is not None
+        else int(config["data"].get("sample_seed", 42))
+    )
+    sample_min_per_task = (
+        args.sample_min_per_task
+        if args.sample_min_per_task is not None
+        else int(config["data"].get("sample_min_per_task", 1))
+    )
+
     # Load dataset
     samples = evaluator.load_ovo_dataset(
         data_path=args.data_path,
         split=config["data"].get("split", "test"),
         anno_path=config["data"].get("anno_path"),
         chunked_dir=config["data"].get("chunked_dir"),
+        sample_ratio=sample_ratio,
+        sample_seed=sample_seed,
+        sample_min_per_task=sample_min_per_task,
     )
     max_samples = args.max_samples or config["evaluation"].get("max_samples")
     if max_samples:

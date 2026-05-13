@@ -4,9 +4,12 @@ OVO-Bench dataset utilities for real video-backed evaluation.
 
 import json
 import logging
+import math
+import random
 import re
+from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from torch.utils.data import Dataset
 
@@ -56,6 +59,46 @@ def _forward_question_and_gt(task_type, annotation, test_info, fallback_question
     return fallback_question, test_info.get("gt", test_info.get("answer_idx", 0))
 
 
+def _stratified_sample(
+    samples: List[Dict[str, Any]],
+    ratio: float,
+    seed: int = 42,
+    min_per_task: int = 1,
+) -> List[Dict[str, Any]]:
+    """Take a stratified-by-task fraction of ``samples`` deterministically.
+
+    Mirrors scripts/prepare_ovo_subset.select_subset so we can pick a
+    benchmark fraction at load time without materialising a per-ratio
+    chunked-videos directory on disk. For forward tasks we group all
+    test_info chunks of the same source annotation together: either
+    the whole annotation is in the subset or none of it is, matching
+    the way SimpleStream/OVO-Bench reports REC/SSR/CRR scores per
+    annotation rather than per chunk.
+    """
+    if not 0 < ratio <= 1:
+        raise ValueError(f"sample_ratio must be in (0, 1], got {ratio}")
+    if ratio == 1.0:
+        return list(samples)
+
+    rng = random.Random(seed)
+    by_task_source: Dict[str, Dict[str, List[Dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
+    for item in samples:
+        task = str(item.get("task_type", "unknown"))
+        source_id = str(item.get("source_id", item.get("video_id", "")))
+        by_task_source[task][source_id].append(item)
+
+    selected: List[Dict[str, Any]] = []
+    for task, source_to_chunks in sorted(by_task_source.items()):
+        source_ids = sorted(source_to_chunks)
+        target = max(int(min_per_task), math.ceil(len(source_ids) * ratio))
+        target = min(target, len(source_ids))
+        chosen_ids = rng.sample(source_ids, target) if target < len(source_ids) else source_ids
+        for sid in sorted(chosen_ids):
+            selected.extend(source_to_chunks[sid])
+
+    return selected
+
+
 class OVOBenchDataset(Dataset):
     """OVO-Bench dataset with on-demand frame loading."""
 
@@ -74,6 +117,9 @@ class OVOBenchDataset(Dataset):
         chunk_duration: float = 1.0,
         fps: float = 1.0,
         use_simplestream_decode: bool = False,
+        sample_ratio: float = 1.0,
+        sample_seed: int = 42,
+        sample_min_per_task: int = 1,
     ):
         self.data_path = Path(data_path)
         self.split = split
@@ -106,7 +152,18 @@ class OVOBenchDataset(Dataset):
         else:
             self._load_legacy_annotations(split)
 
-        logger.info(f"Loaded {len(self.samples)} OVO-Bench {split} samples from {self.data_path}")
+        if sample_ratio is not None and sample_ratio < 1.0:
+            self.samples = _stratified_sample(
+                samples=self.samples,
+                ratio=float(sample_ratio),
+                seed=int(sample_seed),
+                min_per_task=int(sample_min_per_task),
+            )
+
+        logger.info(
+            f"Loaded {len(self.samples)} OVO-Bench {split} samples from {self.data_path}"
+            + (f" (sample_ratio={sample_ratio}, seed={sample_seed})" if sample_ratio and sample_ratio < 1.0 else "")
+        )
 
     def _chunked_relpath(self, filename: str) -> str:
         default_dir = self.data_path / "chunked_videos"

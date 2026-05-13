@@ -193,73 +193,84 @@ Pulls `src_videos.tar.part*` from the HF dataset `JoeLeelyf/OVO-Bench` plus the
 GitHub `ovo_bench_new.json` annotation file. Use `--skip_parts` to only refresh
 the annotation when iterating.
 
-### 2. Stratified subset manifest
+### 2. Fullset manifest (one-time)
 
 ```bash
-# 10% stratified-per-task sample (recommended for quick local benchmarking)
+# Generate manifests + enriched annotation for the entire benchmark
 python -u scripts/prepare_ovo_subset.py \
   --anno_path D:/ssd_video_data/ovo_bench_new.json \
-  --output_dir D:/ssd_video_data/ovo_subset_10pct \
-  --ratio 0.10 --seed 42 --min_per_task 1
+  --output_dir D:/ssd_video_data \
+  --ratio 1.0 --seed 42 --min_per_task 1
 ```
 
-Writes `ovo_bench_subset.json`, `required_sources.txt`, `required_chunks.txt`,
-and `subset_report.json` (task / split / query-unit counts). Pass `--ratio 1.0`
-for the full benchmark, or filter the annotation upstream for a single-task
-sweep (see `tests/compare_paper.py` for an HLD-only example).
+Writes `ovo_bench_full.json` (enriched annotation), `required_sources.txt`
+(~644 unique source video paths), `required_chunks.txt` (~3035 chunk
+filenames), and `subset_report.json` (task / split / query-unit counts).
 
-### 3. Extract only the required source videos from the tar stream
+**Subset selection happens at load time** — set `data.sample_ratio: 0.25` in
+the eval config or pass `--sample_ratio 0.25 --sample_seed 42` on the CLI.
+`OVOBenchDataset` does stratified-by-task, grouped-by-source-video sampling
+deterministically, so all chunks of the same forward-task source stay together.
+No per-ratio chunked-videos directory needed.
+
+### 3. Extract all source videos from the tar stream (one-time)
 
 ```bash
 python -u scripts/extract_ovo_src_subset.py \
   --parts_dir D:/ssd_video_data/ovo_src_parts \
-  --required_sources D:/ssd_video_data/ovo_subset_10pct/required_sources.txt \
-  --output_dir D:/ssd_video_data/ovo_subset_10pct/src_videos
+  --required_sources D:/ssd_video_data/required_sources.txt \
+  --output_dir D:/ssd_video_data/src_videos
 ```
 
-Streams the multi-part tar once (~170 MB/s end to end). The script reports
-progress every GB and verifies every required filename was found.
+Streams the multi-part tar once (~170 MB/s end to end, ~5 min total).
 
-### 4. Chunk videos to per-question end-times (ffmpeg stream-copy)
+### 4. Chunk all videos to per-question end-times (ffmpeg stream-copy)
 
 ```bash
 python -u scripts/chunk_ovo_subset.py \
-  --anno_path D:/ssd_video_data/ovo_subset_10pct/ovo_bench_subset.json \
-  --src_dir D:/ssd_video_data/ovo_subset_10pct/src_videos \
-  --output_dir D:/ssd_video_data/ovo_subset_10pct/chunked_videos
+  --anno_path D:/ssd_video_data/ovo_bench_full.json \
+  --src_dir D:/ssd_video_data/src_videos \
+  --output_dir D:/ssd_video_data/chunked_videos
 ```
 
 Default path uses the `imageio-ffmpeg` bundled binary with `-c copy` — ~50x
-faster than re-encoding (1.5 min for 301 chunks vs ~70 min with OpenCV). Pass
+faster than re-encoding (~14 min for 3035 chunks vs hours with OpenCV). Pass
 `--reencode` to force the OpenCV path when stream-copy is incompatible with the
 source codec.
 
 ### 5. Run the benchmark
 
 ```bash
-mkdir -p results/ovo_10pct
+mkdir -p results/ovo_simplestream
 
+# Required env: HF_HOME on D:\, decord backend, utf-8 stdout
+HF_HOME=D:/hf_cache HUGGINGFACE_HUB_CACHE=D:/hf_cache/hub \
+FORCE_QWENVL_VIDEO_READER=decord PYTHONIOENCODING=utf-8 \
 python -u eval/eval_ovo_bench.py \
-  --config configs/eval_ovo_base_10pct_t4.yaml \
+  --config configs/eval_ovo_simplestream_10pct_t4.yaml \
   --model_path Qwen/Qwen3-VL-8B-Instruct \
-  --data_path D:/ssd_video_data/ovo_subset_10pct \
-  --output_file ./results/ovo_10pct/qwen3vl8b_nf4_t4.json
+  --data_path D:/ssd_video_data \
+  --output_file ./results/ovo_simplestream/qwen3vl8b_int8_t4.json \
+  --sample_ratio 0.25 --sample_seed 42
 ```
 
-The T4-targeted config sets `dtype: float16`, `device_map: cuda`,
-`load_in_4bit: true`, `attn_implementation: sdpa`, `max_pixels: 200704`,
-`max_new_tokens: 64`, `batch_size: 1`. Peak VRAM is ~6.6 GB on 16 GB T4, no
-CPU offload. The script writes both the aggregate JSON and a per-sample
-JSONL (`.partial_predictions.jsonl`) so an interrupted run can be resumed —
-delete that file when changing the dataset loader or prompts.
+The SimpleStream-aligned config sets `dtype: float16`, `device_map: cuda`,
+`load_in_8bit: true`, `attn_implementation: sdpa`, image-list frame encoding,
+`use_simplestream_decode: true`, `max_new_tokens: 256`, `batch_size: 1`.
+Peak VRAM is ~15 GB on 16 GB T4, no CPU offload. The script writes both the
+aggregate JSON and a per-sample JSONL (`.partial_predictions.jsonl`) so an
+interrupted run can be resumed — delete that file when changing the dataset
+loader or prompts.
 
 Related configs:
 
 | File | Purpose |
 |---|---|
-| `configs/eval_ovo_base_10pct_t4.yaml` | 10% subset eval (recommended) |
-| `configs/eval_ovo_base_1pct_t4.yaml`  | 1% smoke-test eval |
-| `configs/eval_ovo_hld_full_t4.yaml`   | Single-task full HLD eval (186 samples) |
+| `configs/eval_ovo_simplestream_10pct_t4.yaml`     | Reproduces SimpleStream Qwen3-VL 4f (int8 + sdpa + image-list + simplestream decode + max_new_tokens=256). 10% subset by default; set `data.sample_ratio` to change |
+| `configs/eval_ovo_simplestream_10pct_t4_nf4.yaml` | Same setup with NF4 instead of int8 — faster, ~7pp HLD accuracy cost |
+| `configs/eval_ovo_base_10pct_t4.yaml`             | OVO-Bench official prompts (older Qwen3-VL setup before SimpleStream alignment) |
+| `configs/eval_ovo_base_1pct_t4.yaml`              | 1% smoke-test eval |
+| `configs/eval_ovo_hld_full_t4.yaml`               | Single-task full HLD eval (186 samples) |
 
 ### 6. Analysis helpers
 
@@ -270,14 +281,19 @@ python tests/compare_subsets.py
 # Per-task delta vs the OVO-Bench paper Table 1 leaderboard
 PYTHONIOENCODING=utf-8 python tests/compare_paper.py
 
+# Per-task delta vs SimpleStream Qwen3-VL 4f published numbers
+PYTHONIOENCODING=utf-8 python tests/compare_simplestream.py
+
 # Wilson 95% CI per task — distinguishes sampling noise from true gaps
-PYTHONIOENCODING=utf-8 python tests/analyze_variance.py
+PYTHONIOENCODING=utf-8 python tests/analyze_variance.py        # vs OVO paper
+PYTHONIOENCODING=utf-8 python tests/analyze_simplestream_ci.py # vs SimpleStream
 ```
 
-`tests/analyze_variance.py` reports per-task Wilson 95% CIs and tells you
-whether the paper number lies inside the CI (i.e. is the gap noise or
-real?). On the 10% subset only HLD remains statistically distinguishable
-from the paper Qwen2-VL-7B; the rest are noise-equivalent at N=11–73.
+`analyze_*.py` reports per-task Wilson 95% CIs and tells you whether the
+reference number lies inside the CI (i.e. is the gap noise or real?). At the
+10% subset size SimpleStream Qwen3-VL 4f numbers all sit inside our 95%
+CIs — gaps that look large per-task (e.g. OCR 100% vs SimpleStream 94%) are
+small-N artifacts, not real differences.
 
 ### GPU smoke test (no full eval)
 
@@ -290,14 +306,18 @@ video generate, and aborts if peak VRAM exceeds the budget.
 
 ### Known caveats on a single T4
 
-- `Qwen2-VL-7B` paper numbers used **bf16 + 64 frames**; this pipeline uses
-  **NF4 + 4 frames** so the cross-comparison is only fair for the lock and
-  forward macro-averages. HLD specifically is ~33 pp below paper on the
-  full 186-sample run — currently attributed to NF4 logit noise (see
-  `tests/analyze_variance.py` for the CI proof that this gap is real and
-  not a sampling artifact).
+- The reproduction target is now **SimpleStream Qwen3-VL 4f**, not the
+  OVO-Bench paper baseline. SimpleStream evaluates with `bf16 + flash_attention_2 +
+  image-list encoding + qwen_vl_utils.fetch_video decode + max_new_tokens=256`
+  on multi-GPU. The two T4 concessions in this repo are bf16 → int8 (or NF4)
+  and FA2 → SDPA; everything else (prompts, scoring, frame encoding, decode
+  pipeline) is byte-for-byte aligned with `EvolvingLMMs-Lab/SimpleStream`.
+- HLD's apparent -33pp gap (NF4 + video temporal-pack + OVO-Bench prompts)
+  was a setup confound, not a real model weakness. After SimpleStream
+  alignment the gap drops to +0.5pp.
 - D:\ on Azure VMs is a **temporary disk**. After a VM stop/start the OVO
-  tar parts and the model cache are gone and step 1 has to be repeated.
+  tar parts, source extraction, chunk videos, and the HF model cache are
+  all gone and step 1 has to be repeated.
 
 ## Running the Full Pipeline
 
