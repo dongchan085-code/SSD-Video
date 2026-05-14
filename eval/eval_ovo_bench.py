@@ -236,12 +236,27 @@ class OVOBenchEvaluator:
                     completed_ids.add(prediction["video_id"])
             logger.info("Loaded %d partial predictions from %s", len(predictions), partial_path)
 
-        pending_samples = [
-            sample for sample in samples
-            if sample.get("video_id") not in completed_ids
-        ]
+        # When `samples` is an OVOBenchDataset, filter at the raw metadata
+        # level so we don't trigger frame decoding for already-completed
+        # records. The frames are loaded lazily only when each pending
+        # sample is pulled from the dataset inside the inference loop.
+        underlying = getattr(samples, "samples", None)
+        if underlying is not None:
+            pending_indices = [
+                i for i, s in enumerate(underlying)
+                if s.get("video_id") not in completed_ids
+            ]
+            pending_iter: Any = (samples[i] for i in pending_indices)
+            pending_count = len(pending_indices)
+        else:
+            pending_samples = [
+                sample for sample in samples
+                if sample.get("video_id") not in completed_ids
+            ]
+            pending_iter = iter(pending_samples)
+            pending_count = len(pending_samples)
 
-        logger.info(f"Evaluating {len(pending_samples)} pending samples out of {len(samples)}")
+        logger.info(f"Evaluating {pending_count} pending samples out of {len(samples)}")
 
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
@@ -253,8 +268,8 @@ class OVOBenchEvaluator:
             partial_handle = open(partial_path, "a", encoding="utf-8")
 
         try:
-            with tqdm(total=len(pending_samples), desc="Evaluating") as pbar:
-                for sample in pending_samples:
+            with tqdm(total=pending_count, desc="Evaluating") as pbar:
+                for sample in pending_iter:
                     # Generate answer via model inference
                     frames = sample.get("frame_images", sample["frames"])
                     t_start = time.perf_counter()
@@ -352,6 +367,8 @@ def main():
     parser.add_argument("--sample_seed", type=int, default=42,
                        help="Seed for the stratified subset sampler")
     parser.add_argument("--sample_min_per_task", type=int, default=1)
+    parser.add_argument("--task_filter", type=str, default=None,
+                       help="Restrict eval to a single task_type (e.g. HLD)")
     args = parser.parse_args()
     
     # Setup logging
@@ -422,6 +439,11 @@ def main():
         sample_seed=sample_seed,
         sample_min_per_task=sample_min_per_task,
     )
+    if args.task_filter:
+        before = len(samples)
+        samples.samples = [s for s in samples.samples if s.get("task_type") == args.task_filter]
+        logger.info("Filtered to task_type=%s: %d / %d samples", args.task_filter, len(samples), before)
+
     max_samples = args.max_samples or config["evaluation"].get("max_samples")
     if max_samples:
         samples = [samples[i] for i in range(min(int(max_samples), len(samples)))]

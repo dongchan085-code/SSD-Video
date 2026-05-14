@@ -25,7 +25,7 @@ def wilson_ci(p: float, n: int, z: float = 1.96):
 
 
 def main():
-    with open("results/ovo_10pct/qwen3vl8b_simplestream_int8_t4.json", encoding="utf-8") as f:
+    with open("results/ovo_simplestream_fullset/qwen3vl8b_nf4_fast_25pct_plus_hld_full_t4.json", encoding="utf-8") as f:
         r = json.load(f)
     by_task = defaultdict(lambda: [0, 0])
     for p in r.get("predictions", []):

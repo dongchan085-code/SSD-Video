@@ -52,8 +52,8 @@ def macro(values, keys):
 
 def main():
     runs = [
-        ("Prior (NF4 + video pack)", "results/ovo_10pct/qwen3vl8b_nf4_t4.json"),
-        ("SimpleStream-aligned (int8)", "results/ovo_10pct/qwen3vl8b_simplestream_int8_t4.json"),
+        ("25% sample (snapshot)", "results/ovo_simplestream_fullset/qwen3vl8b_nf4_fast_25pct_t4.snapshot.json"),
+        ("25% + HLD@100%",        "results/ovo_simplestream_fullset/qwen3vl8b_nf4_fast_25pct_plus_hld_full_t4.json"),
     ]
     data = []
     for label, path in runs:
