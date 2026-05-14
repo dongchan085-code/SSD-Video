@@ -1,0 +1,54 @@
+# HLD-only fullset int8 + SimpleStream-aligned. Isolates NF4 vs int8
+# quantization impact on HLD specifically. Compare against NF4 result at
+# results/ovo_simplestream_fullset/qwen3vl8b_nf4_fast_hld_full_t4.json.
+
+model:
+  model_id: Qwen/Qwen3-VL-8B-Instruct
+  dtype: float16
+  device_map: cuda
+  load_in_8bit: true
+  load_in_4bit: false
+  attn_implementation: sdpa
+
+inference:
+  num_frames: 4
+  recent_frames_only: 4
+  chunk_duration: 1.0
+  fps: 1.0
+  frame_sampling_strategy: simplestream
+  resize_shortest_edge: 224
+  max_new_tokens: 64
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 1
+  do_sample: false
+  use_cache: true
+  use_simplestream_decode: true
+  simplestream_single_vision_block: false
+
+data:
+  dataset_name: ovo_bench
+  data_path: D:/ssd_video_data
+  anno_path: D:/ssd_video_data/ovo_bench_full.json
+  chunked_dir: D:/ssd_video_data/chunked_videos
+  split: test
+  batch_size: 1
+  num_workers: 2
+
+evaluation:
+  metrics:
+    - accuracy
+    - per_task_accuracy
+    - lock_fork_split
+  save_predictions: true
+  output_format: json
+  save_detailed_results: true
+  partial_predictions_file: ./results/ovo_simplestream_fullset/qwen3vl8b_int8_hld_19_t4.partial_predictions.jsonl
+
+logging:
+  log_level: INFO
+  log_interval: 25
+
+hardware:
+  cuda_visible_devices: 0
+  seed: 42

@@ -23,6 +23,41 @@ from ssd_vlm.utils.config import load_config
 logger = logging.getLogger(__name__)
 
 
+def _flatten_vision_features(features: Any) -> torch.Tensor:
+    """Reduce an HF vision-encoder output to a 2D [tokens, hidden] tensor.
+
+    Qwen3-VL's ``Qwen3VLModel.get_image_features`` packs the
+    spatial-merge-aligned token-level embeds into ``pooler_output`` as a tuple
+    of per-frame ``[tokens_i, hidden]`` tensors. ``last_hidden_state`` is the
+    pre-merge feature map and has a different token count, so we must NOT use
+    it as the substitute. Mirrors lib/recent_window_eval._flatten_vision_features
+    but adds the pooler_output fast-path required for transformers >= 5.0.
+    """
+    if isinstance(features, torch.Tensor):
+        return features
+    pooler = getattr(features, "pooler_output", None)
+    if isinstance(pooler, torch.Tensor):
+        return pooler
+    if isinstance(pooler, (tuple, list)):
+        tensors = [t for t in pooler if isinstance(t, torch.Tensor)]
+        if tensors:
+            return torch.cat(tensors, dim=0)
+    for attr in ("image_features", "features", "last_hidden_state"):
+        candidate = getattr(features, attr, None)
+        if isinstance(candidate, torch.Tensor):
+            return candidate
+    if isinstance(features, (tuple, list)) and features:
+        tensors = [t for t in features if isinstance(t, torch.Tensor)]
+        if tensors:
+            return torch.cat(tensors, dim=0)
+        first = features[0]
+        if isinstance(first, torch.Tensor):
+            return first
+        if isinstance(first, (tuple, list)) and first and all(isinstance(t, torch.Tensor) for t in first):
+            return torch.cat(list(first), dim=0)
+    raise TypeError(f"Unexpected vision feature type: {type(features)}")
+
+
 class OVOBenchEvaluator:
     """Evaluator for OVO-Bench benchmark."""
     
@@ -47,6 +82,7 @@ class OVOBenchEvaluator:
         fps: float = 1.0,
         use_cache: bool = True,
         use_simplestream_decode: bool = False,
+        simplestream_single_vision_block: bool = False,
     ):
         """
         Initialize OVO-Bench evaluator.
@@ -70,6 +106,7 @@ class OVOBenchEvaluator:
         self.fps = fps
         self.use_cache = use_cache
         self.use_simplestream_decode = bool(use_simplestream_decode)
+        self.simplestream_single_vision_block = bool(simplestream_single_vision_block)
 
         logger.info(f"Loading model from: {model_path}")
         self.processor, self.model = load_vlm_processor_and_model(
@@ -85,7 +122,16 @@ class OVOBenchEvaluator:
         )
         self.model.eval()
         logger.info("Model loaded successfully")
-        
+
+        if self.simplestream_single_vision_block:
+            tok = self.processor.tokenizer
+            self._vision_start_id = tok.convert_tokens_to_ids("<|vision_start|>")
+            self._vision_end_id = tok.convert_tokens_to_ids("<|vision_end|>")
+            self._im_start_id = tok.convert_tokens_to_ids("<|im_start|>")
+            self._im_end_id = tok.convert_tokens_to_ids("<|im_end|>")
+            self._image_token_id = self.model.config.image_token_id
+            logger.info("SimpleStream single-vision-block encoding enabled")
+
         # Task definitions
         # Temporal Lock tasks: real-time perception (sharp distributions needed)
         self.lock_tasks = LOCK_TASKS
@@ -155,6 +201,17 @@ class OVOBenchEvaluator:
             frame_iter = frames
         else:
             frame_iter = [frames]
+
+        if self.simplestream_single_vision_block:
+            return self._generate_answer_single_block(
+                prompt=prompt,
+                frames=frame_iter,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                do_sample=do_sample,
+            )
+
         image_content = [{"type": "image", "image": frame} for frame in frame_iter]
 
         messages = [
@@ -163,7 +220,7 @@ class OVOBenchEvaluator:
                 "content": image_content + [{"type": "text", "text": prompt}],
             }
         ]
-        
+
         # Unified apply_chat_template (Qwen3-VL API)
         inputs = self.processor.apply_chat_template(
             messages,
@@ -177,7 +234,7 @@ class OVOBenchEvaluator:
         # Move to device
         inputs = {k: v.to(self.model.device) if torch.is_tensor(v) else v
                  for k, v in inputs.items()}
-        
+
         # Generate
         output_ids = self.model.generate(
             **inputs,
@@ -188,14 +245,137 @@ class OVOBenchEvaluator:
             do_sample=do_sample,
             use_cache=self.use_cache,
         )
-        
+
         # Decode
         generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
         answer = self.processor.decode(
             generated_ids,
             skip_special_tokens=True,
         )
-        
+
+        return answer.strip()
+
+    @torch.no_grad()
+    def _generate_answer_single_block(
+        self,
+        prompt: str,
+        frames: List[Any],
+        temperature: float,
+        top_k: int,
+        top_p: float,
+        do_sample: bool,
+    ) -> str:
+        """SimpleStream's single-vision-block encoding path.
+
+        Mirrors lib/recent_window_eval.RecentWindowQAModel: encode frames via the
+        processor once to get pixel_values + image_grid_thw, run vision encoder
+        to obtain vision embeddings, then hand-build the input sequence with a
+        SINGLE ``<|vision_start|>...<|vision_end|>`` block containing all frame
+        tokens. The default apply_chat_template path emits one vision block
+        per frame, which breaks temporal continuity for long-horizon tasks
+        like HLD.
+        """
+        device = self.model.device
+
+        # Step 1: vision encoding via the processor
+        image_content = [{"type": "image", "image": frame} for frame in frames]
+        enc_messages = [{
+            "role": "user",
+            "content": image_content + [{"type": "text", "text": "."}],
+        }]
+        enc_inputs = self.processor.apply_chat_template(
+            enc_messages,
+            tokenize=True,
+            add_generation_prompt=False,
+            return_dict=True,
+            return_tensors="pt",
+        )
+        pixel_values = enc_inputs["pixel_values"].to(device)
+        image_grid_thw = enc_inputs["image_grid_thw"].to(device)
+
+        feature_module = self.model if hasattr(self.model, "get_image_features") else self.model.model
+        vision_features = feature_module.get_image_features(pixel_values, image_grid_thw)
+        vision_embeds = _flatten_vision_features(vision_features)
+
+        num_vision_tokens = int(vision_embeds.shape[0])
+
+        # Step 2: hand-build the input sequence with a single vision block
+        tokenizer = self.processor.tokenizer
+        question_ids = tokenizer.encode(prompt, add_special_tokens=False)
+
+        input_ids_list: List[int] = []
+        input_ids_list.append(self._im_start_id)
+        input_ids_list.extend(tokenizer.encode("user\n", add_special_tokens=False))
+        input_ids_list.append(self._vision_start_id)
+        input_ids_list.extend([self._image_token_id] * num_vision_tokens)
+        input_ids_list.append(self._vision_end_id)
+        input_ids_list.extend(tokenizer.encode("\n", add_special_tokens=False))
+        input_ids_list.extend(question_ids)
+        input_ids_list.append(self._im_end_id)
+        input_ids_list.extend(tokenizer.encode("\n", add_special_tokens=False))
+        input_ids_list.append(self._im_start_id)
+        input_ids_list.extend(tokenizer.encode("assistant\n", add_special_tokens=False))
+
+        input_ids = torch.tensor([input_ids_list], dtype=torch.long, device=device)
+        attention_mask = torch.ones_like(input_ids)
+        prompt_length = int(input_ids.shape[1])
+
+        inputs_embeds = self.model.get_input_embeddings()(input_ids)
+        vision_embeds = vision_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+        image_mask = input_ids == self._image_token_id
+        image_mask_expanded = image_mask.unsqueeze(-1).expand_as(inputs_embeds)
+        inputs_embeds = inputs_embeds.masked_scatter(image_mask_expanded, vision_embeds)
+
+        multimodal_model = self.model.model
+        # Qwen3-VL (transformers 5.x) requires mm_token_type_ids: 0=text, 1=image, 2=video.
+        # In 5.x, get_rope_index runs an itertools.groupby over mm_token_type_ids
+        # and consumes exactly ONE image_grid_thw row per consecutive image group.
+        # SimpleStream's single-vision-block trick (all N frames' image tokens in
+        # a single <|vision_start|>...<|vision_end|>) collapses to one image
+        # group, so we must also collapse image_grid_thw 4-rows-of-[1,H,W] into
+        # a single [N,H,W] row so the rope positions cover all vision tokens.
+        mm_token_type_ids = torch.zeros_like(input_ids, dtype=torch.int32)
+        mm_token_type_ids[input_ids == self._image_token_id] = 1
+        unique_hw = torch.unique(image_grid_thw[:, 1:], dim=0)
+        if unique_hw.shape[0] == 1:
+            t_total = int(image_grid_thw[:, 0].sum().item())
+            h = int(unique_hw[0, 0].item())
+            w = int(unique_hw[0, 1].item())
+            combined_grid_thw = torch.tensor(
+                [[t_total, h, w]], dtype=image_grid_thw.dtype, device=image_grid_thw.device
+            )
+        else:
+            raise RuntimeError(
+                "single-vision-block path requires all frames to share the same h,w; "
+                f"got image_grid_thw={image_grid_thw.tolist()}"
+            )
+        position_ids, _ = multimodal_model.get_rope_index(
+            input_ids=input_ids,
+            mm_token_type_ids=mm_token_type_ids,
+            image_grid_thw=combined_grid_thw,
+            video_grid_thw=None,
+            attention_mask=attention_mask,
+        )
+
+        output_ids = self.model.generate(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            max_new_tokens=self.max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            do_sample=do_sample,
+            use_cache=self.use_cache,
+        )
+
+        # When generating with inputs_embeds, transformers may or may not
+        # include the prompt prefix in output_ids — handle both cases.
+        if output_ids.shape[1] > prompt_length:
+            generated_ids = output_ids[0][prompt_length:]
+        else:
+            generated_ids = output_ids[0]
+        answer = self.processor.decode(generated_ids, skip_special_tokens=True)
         return answer.strip()
     
     def evaluate(
@@ -411,6 +591,9 @@ def main():
         fps=config["inference"].get("fps", 1.0),
         use_cache=config["inference"].get("use_cache", True),
         use_simplestream_decode=config["inference"].get("use_simplestream_decode", False),
+        simplestream_single_vision_block=config["inference"].get(
+            "simplestream_single_vision_block", False
+        ),
     )
     
     sample_ratio = (
