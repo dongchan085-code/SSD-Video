@@ -27,9 +27,9 @@ class TestSimpleStreamCompatibility(unittest.TestCase):
         self.assertIn("Only give the best option's letter directly.", prompt)
 
     def test_forward_prompts(self):
-        self.assertIn("Only answer with a number.", format_ovo_prompt("REC", "How many?"))
-        self.assertIn("Only answer Yes or No.", format_ovo_prompt("SSR", "Will it happen?"))
-        self.assertIn("Only answer Yes or No.", format_ovo_prompt("CRR", "Will it happen?"))
+        self.assertIn("Only give a number as answer.", format_ovo_prompt("REC", "How many?"))
+        self.assertIn("Answer Yes or No only.", format_ovo_prompt("SSR", "Will it happen?"))
+        self.assertIn("Answer Yes or No only.", format_ovo_prompt("CRR", "Will it happen?"))
 
     def test_scoring(self):
         self.assertTrue(score_prediction("OCR", "B", 1)["correct"])
