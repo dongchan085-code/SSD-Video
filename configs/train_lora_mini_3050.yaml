@@ -1,0 +1,57 @@
+# RTX 3050 4GB LoRA training smoke config.
+# Qwen3-VL-2B-Instruct on GPU (NF4 + SDPA), batch=1, grad_ckpt.
+# Intended for tests/test_train_lora_smoke.py only.
+#
+# NOTE: LoRATrainer loads via AutoModelForImageTextToText (no NF4/bnb support).
+# This config runs on CPU (float32) via the mini path for import/pipeline
+# shape verification. GPU path needs load_vlm_processor_and_model instead.
+
+model:
+  model_id: Qwen/Qwen3-VL-2B-Instruct
+  dtype: float32
+  device_map: cpu
+  load_in_4bit: false
+  load_in_8bit: false
+
+lora:
+  r: 8
+  lora_alpha: 16
+  lora_dropout: 0.1
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - v_proj
+  modules_to_save: null
+  init_lora_weights: true
+
+training:
+  output_dir: ./outputs/lora_3050_smoke
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 1
+  learning_rate: 5.0e-4
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  optim: adamw_torch
+  max_grad_norm: 1.0
+  gradient_checkpointing: false
+  logging_steps: 1
+  save_steps: 9999
+  deepspeed: null
+  fp16: false
+  bf16: false
+  tf32: false
+  dataloader_num_workers: 0
+  dataloader_pin_memory: false
+  backend: none
+
+data:
+  num_frames: 4
+  frame_sampling_strategy: uniform
+  resize_shortest_edge: 224
+  max_seq_length: 256
+  vqa_buffer_ratio: 0.0
+
+seed: 42

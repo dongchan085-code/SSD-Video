@@ -125,6 +125,7 @@ class LoRATrainer:
 
         self.optimizer = None
         self.scheduler = None
+        self.last_loss: Optional[float] = None
     
     def setup_optimizer(self, num_training_steps: int):
         """Setup optimizer and scheduler."""
@@ -276,6 +277,7 @@ class LoRATrainer:
             # Save epoch checkpoint
             self._save_model(epoch, suffix="")
         
+        self.last_loss = epoch_loss / max(1, len(train_dataloader))
         logger.info("Training complete!")
         self._save_model(-1, "final")
 

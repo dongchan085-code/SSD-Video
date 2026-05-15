@@ -1,0 +1,17 @@
+# RTX 3050 4GB inference profile — Qwen3-VL-2B-Instruct + NF4 + SDPA.
+#
+# Qwen3-VL-8B does NOT fit in 4GB even at NF4 (~6.5GB). Use 2B instead.
+# NF4 2B ≈ 1.5GB; 4 frames @ max_pixels=200704 (256 tok/frame) → KV ~0.3GB;
+# activations ~0.2GB. Total ≈ 2GB — comfortable headroom on 4GB.
+#
+# Use via extends: in eval/smoke configs that target this machine.
+# For production OVO-Bench eval use the T4 profile (_t4_nf4_sdpa.yaml) instead.
+
+model:
+  dtype: float16
+  device_map: cuda
+  load_in_4bit: true
+  load_in_8bit: false
+  attn_implementation: sdpa
+  max_pixels: 200704
+  min_pixels: 3136

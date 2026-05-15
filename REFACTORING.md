@@ -27,7 +27,7 @@ Cross-reference: `wiki.md` (file-level inventory). Items below are ordered by RO
 | R6 | deferred | Skipped for now — trainer code can't be validated without GPU; FullFTTrainer is ablation-only so risk/reward unfavorable until P3. |
 | R10 | done | `run_ablations.sh` extended with ablations 10–12 (sampling temp / top-k / oversample ratio sweeps); `generate_samples.py` gained `--set section.key=value` CLI override |
 | R11 | done | `tests/compare_1pct.py` parameterized with positional CLI args; defaults retained |
-| R12 | pending | `test_train_lora_smoke.py` still needs GPU; precomputed-frames path covered by `test_precomputed_frames.py` |
+| R12 | done | `tests/test_train_lora_smoke.py`: instantiates LoRATrainer (Qwen3-VL-2B CPU), runs 1 step on synthetic text batch, asserts loss finite. Marked `slow`; skips gracefully if model weights absent. |
 
 ## Priority 1 — High-ROI deduplication (do first)
 
