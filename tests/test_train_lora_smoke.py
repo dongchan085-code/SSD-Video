@@ -14,13 +14,10 @@ Mark: slow  (skipped in fast CI, run manually or on the 3050 machine)
 
 import math
 import sys
-import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import torch
-from torch.utils.data import DataLoader
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
