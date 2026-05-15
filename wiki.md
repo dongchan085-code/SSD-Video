@@ -2,7 +2,7 @@
 
 Compact codebase reference. Loaded alongside `CLAUDE.md` to skip re-exploration on planning tasks. `CLAUDE.md` covers *what* and *why*; this file covers *where*.
 
-Last refreshed: 2026-05-13 (after SimpleStream Qwen3-VL 4f reproduction work). If file moves/renames invalidate paths below, refresh by re-running the `/plan` exploration.
+Last refreshed: 2026-05-15 (after precomputed-frames pipeline: extract_chunk_frames.py, load_precomputed_frames, dead cache removal). If file moves/renames invalidate paths below, refresh by re-running the `/plan` exploration.
 
 ---
 
@@ -27,9 +27,9 @@ ssd_vlm/
     ├── __init__.py                  # exports OVOBenchDataset, SSDSampleDataset, SSD sample dataloader helpers
     ├── perception_test_dataset.py   # train-split loader, 4-frame uniform, 2× memory oversample
     ├── ssd_sample_dataset.py        # JSONL replay loader for LoRA training
-    ├── ovo_bench_dataset.py         # OVO-Bench test loader with frame cache; supports sample_ratio
+    ├── ovo_bench_dataset.py         # OVO-Bench test loader; supports sample_ratio + use_precomputed_frames
     ├── qwen_exact_recent_decoder.py # vendored from EvolvingLMMs-Lab/SimpleStream: decode only the last N tail frames
-    └── video_utils.py               # load_video_frames_dual() (+ use_simplestream_decode flag), _fetch_simplestream_frames(), load_video_frames(), load_video_frame_images()
+    └── video_utils.py               # load_video_frames_dual() (+ use_simplestream_decode + precomputed_frame_dir), load_precomputed_frames(), resolve_frame_dir(), _fetch_simplestream_frames()
 ```
 
 **Important path correction**: CLAUDE.md mentions `ssd_vlm/training/utils/model_loading.py` — actual location is `ssd_vlm/model_loading.py` (top-level), and `ssd_vlm/training/utils.py` is a single file (not a package).
@@ -48,7 +48,9 @@ ssd_vlm/
 | `_forward_question_and_gt(task, anno, test_info, fallback)` | `ssd_vlm/data/ovo_bench_dataset.py` | REC/SSR/CRR ground-truth and question construction (count / type→bool / annotation question) |
 | `_stratified_sample(samples, ratio, seed, min_per_task)` | `ssd_vlm/data/ovo_bench_dataset.py` | sample fractions of the dataset at load time without per-ratio subset dirs |
 | `CosineWarmupScheduler`, `save_checkpoint`, `log_model_info` | `ssd_vlm/training/utils.py` | both trainers |
-| `load_video_frames_dual(..., use_simplestream_decode=False)` | `ssd_vlm/data/video_utils.py` | all three dataset classes; flag swaps decode path |
+| `load_video_frames_dual(..., use_simplestream_decode=False, precomputed_frame_dir=None)` | `ssd_vlm/data/video_utils.py` | all three dataset classes; flags swap decode path |
+| `load_precomputed_frames(frame_dir, num_frames, *, expected_fps, expected_chunk_duration)` | `ssd_vlm/data/video_utils.py` | reads last N PNGs + meta.json written by `extract_chunk_frames.py`; raises ValueError on fps/chunk_duration mismatch |
+| `resolve_frame_dir(data_path, video_id, chunked_frames_dir=None)` | `ssd_vlm/data/video_utils.py` | returns `<chunked_frames>/<video_id>/` if meta.json present, else None |
 | `_fetch_simplestream_frames(...)` | `ssd_vlm/data/video_utils.py` | SimpleStream-aligned decode (qwen_vl_utils.fetch_video + chunk-by-time + auto-exact-recent when chunk_duration*fps==1.0) |
 | `fetch_recent_video_exact(ele, last_nframes, ...)` | `ssd_vlm/data/qwen_exact_recent_decoder.py` | tail-only decord/torchcodec decode; avoids CPU OOM on long OVO chunks |
 | `create_ssd_sample_dataloader(s)` | `ssd_vlm/data/ssd_sample_dataset.py` | `train_lora.py`, `train_full_ft.py` |
@@ -71,7 +73,7 @@ Perception Test ──► Stage 1 ──► samples.jsonl ──► Stage 2 ─�
                                  metadata}
 ```
 
-JSONL is written incrementally (every 100 batches) — survives interruption. Frame cache: memory-mapped `.npy` files keyed by `(video_id, num_frames, resolution)`.
+JSONL is written incrementally (every 100 batches) — survives interruption. The `.npy` frame cache that previously existed in `read_video_frames` was never populated (callers always passed `frame_indices`) and has been removed.
 
 ---
 
@@ -98,6 +100,7 @@ JSONL is written incrementally (every 100 batches) — survives interruption. Fr
 | `figures/plot_*.py` (8 scripts) | viz | — |
 | `scripts/download_data.sh` / `download_mini_data.sh` / `download_ovo_sources.py` | data download | — |
 | `scripts/download_extract_chunked.py` | **preferred** stream-download + extract HF `chunked_videos.tar.part*` directly to `chunked_videos/`, deleting each tar part as soon as it is consumed | — |
+| `scripts/extract_chunk_frames.py --input_dir … --output_dir … [--delete_source]` | **D:\ space reclaim**: walks `chunked_videos/*.mp4`, extracts last-32 frames as PNG (short-edge 384) + meta.json per chunk to `chunked_frames/<id>/`, optionally deletes the mp4. Idempotent — skips dirs where meta.json + png count already match. | — |
 | `scripts/prepare_mini_data.py` / `prepare_ovo_subset.py` / `chunk_ovo_subset.py` / `extract_ovo_src_subset.py` | data prep (local chunking path, fallback) | — |
 | `scripts/smoke_qwen8b_load.py` | preflight | — |
 
@@ -144,7 +147,9 @@ PowerShell variants: `scripts/prepare_ovo_subset_pipeline.ps1`, `scripts/run_sim
 | `tests/analyze_variance.py` | Wilson 95% CI per task vs OVO-Bench paper — flags noise-equivalent vs statistically distinguishable |
 | `tests/analyze_simplestream_ci.py` | same but vs SimpleStream paper |
 
-No `pytest.ini`/`conftest.py`/`pyproject.toml`. Coverage gaps: **no test exercises `train_lora.py`, `train_full_ft.py`, or `video_utils.py`**; choice-extraction is tested via re-implementation in `smoke_test.py` (lines 649-780) rather than direct import.
+No `pytest.ini`/`conftest.py`/`pyproject.toml`. Coverage gaps: **no test exercises `train_lora.py` or `train_full_ft.py`**; choice-extraction is tested via re-implementation in `smoke_test.py` (lines 649-780) rather than direct import.
+
+| `tests/test_precomputed_frames.py` | `load_precomputed_frames`, `resolve_frame_dir`, `extract_chunk_frames._extract_one` round-trip; 10 pass / 3 skip (cv2-dependent extractor tests skip without OpenCV) |
 
 ---
 
@@ -164,11 +169,18 @@ D:\ssd_video_data\
 ├── ovo_bench_full.json        # same content, enriched with video_relpath fields
 ├── ovo_src_parts\             # 43 GB src_videos.tar.part{aa..ae}, downloaded once
 ├── src_videos\                # full extraction: ~644 source videos, ~43 GB
-├── chunked_videos\            # full chunk set, generated on demand by chunk_ovo_subset.py
+├── chunked_videos\            # ~100 GB mp4s; run extract_chunk_frames.py --delete_source to reclaim
+├── chunked_frames\            # ~3–6 GB PNGs after extraction; layout: <video_id>/frame_NN.png + meta.json
+│   └── <video_id>/
+│       ├── frame_00.png … frame_31.png   # last 32 frames at fps=1, short-edge=384
+│       └── meta.json                     # extraction_fps, chunk_duration, frame_indices, saved_count, …
+├── hf_cache\                  # Qwen3-VL-8B weights + processor (~16 GB)
 ├── required_sources.txt       # 644 paths, written by prepare_ovo_subset.py --ratio 1.0
 ├── required_chunks.txt        # ~3035 chunk filenames
 └── subset_report.json
 ```
+
+**After running `extract_chunk_frames.py --delete_source`**: `chunked_videos/` → 0 bytes; `chunked_frames/` ≤ 6 GB. Flip `data.use_precomputed_frames: true` in the eval config to activate the PNG path — `OVOBenchDataset` will route each chunk through `load_precomputed_frames` instead of decoding the mp4.
 
 **Per-ratio subset directories are gone.** Earlier the pipeline materialised `ovo_subset_1pct/`, `ovo_subset_10pct/`, etc. — each with its own `src_videos\` + `chunked_videos\`. After the dataset-level sampling refactor (`OVOBenchDataset.sample_ratio`) we keep one fullset on D:\ and sample at load time, which saves ~50 GB per ratio and avoids cross-subset drift.
 
@@ -194,6 +206,9 @@ Resolved (P2):
 - ~~T4 quantization block repeated across configs~~ → `configs/_t4_nf4_sdpa.yaml` is the canonical profile, consumed via `extends:`.
 - ~~`eval/eval_ovo_bench.py` 613 lines / mixed concerns~~ → metrics aggregation extracted to `ssd_vlm/eval_metrics.py:summarize_ovo_predictions`. File is now 428 lines.
 - ~~Datasets decoded each video twice~~ → `load_video_frames_dual` returns both tensor and PIL frames in one pass; all 3 dataset classes use it.
+- ~~`read_video_frames` leaking cv2.VideoCapture handles on exception~~ → wrapped in `try/finally cap.release()`.
+- ~~Dead `.npy`/`.npz` frame cache in `read_video_frames`~~ → removed; callers always passed `frame_indices`, so the cache branch was never reached. `cache_dir`/`enable_cache` params dropped from all three datasets.
+- ~~Download-thread errors delayed 300 s before surfacing~~ → `error_box` checked before `thread.join`; join timeout reduced to 30 s.
 
 ---
 

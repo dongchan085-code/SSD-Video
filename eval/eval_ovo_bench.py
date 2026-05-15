@@ -83,6 +83,8 @@ class OVOBenchEvaluator:
         use_cache: bool = True,
         use_simplestream_decode: bool = False,
         simplestream_single_vision_block: bool = False,
+        use_precomputed_frames: bool = False,
+        chunked_frames_dir: Optional[str] = None,
     ):
         """
         Initialize OVO-Bench evaluator.
@@ -107,6 +109,8 @@ class OVOBenchEvaluator:
         self.use_cache = use_cache
         self.use_simplestream_decode = bool(use_simplestream_decode)
         self.simplestream_single_vision_block = bool(simplestream_single_vision_block)
+        self.use_precomputed_frames = bool(use_precomputed_frames)
+        self.chunked_frames_dir = chunked_frames_dir
 
         logger.info(f"Loading model from: {model_path}")
         self.processor, self.model = load_vlm_processor_and_model(
@@ -164,6 +168,8 @@ class OVOBenchEvaluator:
             sample_ratio=sample_ratio,
             sample_seed=sample_seed,
             sample_min_per_task=sample_min_per_task,
+            use_precomputed_frames=self.use_precomputed_frames,
+            chunked_frames_dir=self.chunked_frames_dir,
         )
     
     @torch.no_grad()
@@ -594,6 +600,8 @@ def main():
         simplestream_single_vision_block=config["inference"].get(
             "simplestream_single_vision_block", False
         ),
+        use_precomputed_frames=config["data"].get("use_precomputed_frames", False),
+        chunked_frames_dir=config["data"].get("chunked_frames_dir"),
     )
     
     sample_ratio = (

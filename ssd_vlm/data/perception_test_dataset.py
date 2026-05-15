@@ -39,8 +39,6 @@ class PerceptionTestDataset(Dataset):
         frame_sampling_strategy: str = "uniform",
         resize_shortest_edge: int = 224,
         memory_skill_oversample_ratio: float = 2.0,
-        cache_dir: Optional[str] = None,
-        enable_cache: bool = True,
         recent_frames_only: Optional[int] = None,
         chunk_duration: float = 1.0,
         fps: float = 1.0,
@@ -55,8 +53,6 @@ class PerceptionTestDataset(Dataset):
             frame_sampling_strategy: 'uniform' or 'random'
             resize_shortest_edge: Target resolution for frames
             memory_skill_oversample_ratio: Oversample ratio for memory skill (default 2x)
-            cache_dir: Directory for frame cache
-            enable_cache: Whether to enable caching
         """
         self.data_path = Path(data_path)
         self.split = split
@@ -64,18 +60,10 @@ class PerceptionTestDataset(Dataset):
         self.frame_sampling_strategy = frame_sampling_strategy
         self.resize_shortest_edge = resize_shortest_edge
         self.memory_skill_oversample_ratio = memory_skill_oversample_ratio
-        self.enable_cache = enable_cache
         self.recent_frames_only = recent_frames_only or num_frames
         self.chunk_duration = chunk_duration
         self.fps = fps
-        
-        # Setup cache directory
-        if cache_dir is None:
-            cache_dir = self.data_path / ".frame_cache"
-        self.cache_dir = Path(cache_dir)
-        if enable_cache:
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Load annotations
         self.annotations_file = self.data_path / f"{split}_annotations.json"
         self.split_file = self.data_path / f"{split}_split.json"
@@ -169,8 +157,6 @@ class PerceptionTestDataset(Dataset):
             tensor_resize_shortest_edge=self.resize_shortest_edge,
             pil_resize_shortest_edge=None,
             frame_sampling_strategy=self.frame_sampling_strategy,
-            cache_dir=self.cache_dir,
-            enable_cache=self.enable_cache,
             recent_frames_only=(
                 self.recent_frames_only
                 if self.frame_sampling_strategy in {"recent", "recent_window", "simplestream"}

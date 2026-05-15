@@ -42,8 +42,6 @@ class SSDSampleDataset(Dataset):
         resize_shortest_edge: int = 224,
         max_seq_length: int = 4096,
         vqa_buffer_ratio: float = 0.1,
-        cache_dir: Optional[str] = None,
-        enable_cache: bool = True,
         seed: int = 42,
     ):
         self.samples_path = Path(samples_path)
@@ -55,9 +53,6 @@ class SSDSampleDataset(Dataset):
         self.resize_shortest_edge = resize_shortest_edge
         self.max_seq_length = max_seq_length
         self.vqa_buffer_ratio = vqa_buffer_ratio
-        self.enable_cache = enable_cache
-        self.cache_dir = Path(cache_dir) if cache_dir else None
-
         if self.processor is None and self.tokenizer is None:
             raise ValueError("Either processor or tokenizer must be provided")
 
@@ -128,7 +123,6 @@ class SSDSampleDataset(Dataset):
         sample = self.raw_samples[idx]
         prompt, completion = self._get_prompt_completion(sample, idx)
         data_root, video_path = self._resolve_video(sample)
-        cache_dir = self.cache_dir or (data_root / ".frame_cache")
         frames, frame_images, frame_indices, total_frames, frame_timestamps, chunk_ids = (
             load_video_frames_dual(
                 video_path=video_path,
@@ -139,8 +133,6 @@ class SSDSampleDataset(Dataset):
                     "frame_sampling_strategy",
                     self.frame_sampling_strategy,
                 ),
-                cache_dir=cache_dir,
-                enable_cache=self.enable_cache,
                 frame_indices=sample.get("frame_indices"),
                 recent_frames_only=sample.get("recent_frames_only"),
                 chunk_duration=sample.get("chunk_duration", 1.0),
@@ -329,7 +321,6 @@ def create_ssd_sample_dataloaders(
     validation_split_ratio: float = 0.0,
     pin_memory: bool = True,
     drop_last: bool = False,
-    enable_cache: bool = True,
     seed: int = 42,
     persistent_workers: bool = False,
     prefetch_factor: int = 2,
@@ -344,7 +335,6 @@ def create_ssd_sample_dataloaders(
         resize_shortest_edge=resize_shortest_edge,
         max_seq_length=max_seq_length,
         vqa_buffer_ratio=vqa_buffer_ratio,
-        enable_cache=enable_cache,
         seed=seed,
     )
     collator = SSDSampleDataCollator(

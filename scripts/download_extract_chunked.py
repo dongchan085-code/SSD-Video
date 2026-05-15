@@ -278,7 +278,15 @@ def main() -> None:
     finally:
         reader.close()
 
-    thread.join(timeout=300)
+    # Surface a downloader exception immediately if one was raised — the
+    # thread sets error_box before putting its final sentinel, so by the
+    # time the reader has exited the box is guaranteed to be populated
+    # on the failure path. Don't pay the 300 s join timeout for nothing.
+    if error_box:
+        raise error_box[0]
+    thread.join(timeout=30)
+    if thread.is_alive():
+        print("[warn] downloader thread still alive after 30s; abandoning", flush=True)
     if error_box:
         raise error_box[0]
 

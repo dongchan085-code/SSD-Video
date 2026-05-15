@@ -15,6 +15,7 @@ from torch.utils.data import Dataset
 
 from ssd_vlm.data.video_utils import (
     load_video_frames_dual,
+    resolve_frame_dir,
     resolve_video_path,
 )
 from ssd_vlm.simplestream import (
@@ -109,8 +110,6 @@ class OVOBenchDataset(Dataset):
         num_frames: int = 4,
         frame_sampling_strategy: str = "uniform",
         resize_shortest_edge: int = 224,
-        cache_dir: Optional[str] = None,
-        enable_cache: bool = True,
         anno_path: Optional[str] = None,
         chunked_dir: Optional[str] = None,
         recent_frames_only: Optional[int] = None,
@@ -120,22 +119,23 @@ class OVOBenchDataset(Dataset):
         sample_ratio: float = 1.0,
         sample_seed: int = 42,
         sample_min_per_task: int = 1,
+        use_precomputed_frames: bool = False,
+        chunked_frames_dir: Optional[str] = None,
     ):
         self.data_path = Path(data_path)
         self.split = split
         self.num_frames = num_frames
         self.frame_sampling_strategy = frame_sampling_strategy
         self.resize_shortest_edge = resize_shortest_edge
-        self.enable_cache = enable_cache
         self.recent_frames_only = recent_frames_only or num_frames
         self.chunk_duration = chunk_duration
         self.fps = fps
         self.use_simplestream_decode = bool(use_simplestream_decode)
+        self.use_precomputed_frames = bool(use_precomputed_frames)
         self.chunked_dir = Path(chunked_dir) if chunked_dir else self.data_path / "chunked_videos"
-        self.cache_dir = Path(cache_dir) if cache_dir else self.data_path / ".frame_cache"
-        if self.enable_cache:
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-
+        self.chunked_frames_dir = (
+            Path(chunked_frames_dir) if chunked_frames_dir else self.data_path / "chunked_frames"
+        )
         self._leakage_suspect_re = re.compile(
             r'\b(currently|now|visible|present|this scene|in the frame|right now)\b',
             re.IGNORECASE,
@@ -266,11 +266,23 @@ class OVOBenchDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         sample = self.samples[idx].copy()
-        video_path = resolve_video_path(
-            data_path=self.data_path,
-            video_id=sample["video_id"],
-            video_relpath=sample.get("video_relpath"),
-        )
+        precomputed_dir = None
+        if self.use_precomputed_frames:
+            precomputed_dir = resolve_frame_dir(
+                data_path=self.data_path,
+                video_id=sample["video_id"],
+                chunked_frames_dir=self.chunked_frames_dir,
+            )
+        if precomputed_dir is not None:
+            video_path = None
+            source_id = str(precomputed_dir)
+        else:
+            video_path = resolve_video_path(
+                data_path=self.data_path,
+                video_id=sample["video_id"],
+                video_relpath=sample.get("video_relpath"),
+            )
+            source_id = str(video_path)
         # SimpleStream decode skips our resize so the official Qwen-VL aware
         # preprocessing in the processor matches the published baseline.
         pil_resize = None if self.use_simplestream_decode else self.resize_shortest_edge
@@ -281,12 +293,11 @@ class OVOBenchDataset(Dataset):
                 tensor_resize_shortest_edge=self.resize_shortest_edge,
                 pil_resize_shortest_edge=pil_resize,
                 frame_sampling_strategy=self.frame_sampling_strategy,
-                cache_dir=self.cache_dir,
-                enable_cache=self.enable_cache,
                 recent_frames_only=self.recent_frames_only,
                 chunk_duration=self.chunk_duration,
                 fps=self.fps,
                 use_simplestream_decode=self.use_simplestream_decode,
+                precomputed_frame_dir=precomputed_dir,
             )
         )
         sample.update({
@@ -296,6 +307,6 @@ class OVOBenchDataset(Dataset):
             "frame_timestamps": frame_timestamps,
             "chunk_ids": chunk_ids,
             "total_frames": total_frames,
-            "video_path": str(video_path),
+            "video_path": source_id,
         })
         return sample

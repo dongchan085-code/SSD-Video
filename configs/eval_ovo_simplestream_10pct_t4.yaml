@@ -32,12 +32,21 @@ inference:
 
 data:
   dataset_name: ovo_bench
-  data_path: D:/ssd_video_data/ovo_subset_10pct
-  anno_path: D:/ssd_video_data/ovo_subset_10pct/ovo_bench_subset.json
-  chunked_dir: D:/ssd_video_data/ovo_subset_10pct/chunked_videos
+  data_path: D:/ssd_video_data
+  anno_path: D:/ssd_video_data/ovo_bench_new.json
+  chunked_dir: D:/ssd_video_data/chunked_videos
+  # Flip to true after running:
+  #   python scripts/extract_chunk_frames.py \
+  #       --input_dir D:/ssd_video_data/chunked_videos \
+  #       --output_dir D:/ssd_video_data/chunked_frames \
+  #       --delete_source
+  use_precomputed_frames: false
+  chunked_frames_dir: D:/ssd_video_data/chunked_frames
   split: test
   batch_size: 1
   num_workers: 2
+  sample_ratio: 0.10
+  sample_seed: 42
 
 evaluation:
   metrics:

@@ -25,6 +25,9 @@ data:
   data_path: ./data/ovo_bench
   anno_path: ./data/ovo_bench/ovo_bench_new.json
   chunked_dir: ./data/ovo_bench/chunked_videos
+  # Set to true after running scripts/extract_chunk_frames.py on D:\
+  # chunked_frames_dir defaults to <data_path>/chunked_frames/
+  use_precomputed_frames: false
   split: test
   batch_size: 1
   num_workers: 2
