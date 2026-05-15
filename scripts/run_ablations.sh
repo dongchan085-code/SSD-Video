@@ -234,6 +234,110 @@ fi
 
 echo ""
 echo "=========================================="
+echo "Ablation 10: Sampling Temperature Sweep"
+echo "=========================================="
+echo "Testing: sensitivity to SSD sampling temperature (0.8 / 1.0 / 1.2 / 1.5 / 2.0)"
+echo ""
+
+for TEMP in 0.8 1.0 1.2 1.5 2.0; do
+    SAFE_TEMP="${TEMP//./_}"
+    OUT_SAMPLES="${OUTPUT_DIR}/ablation_sampling_temp_${SAFE_TEMP}_samples"
+    OUT_CKPT="${OUTPUT_DIR}/ablation_sampling_temp_${SAFE_TEMP}_lora"
+    python "${PROJECT_DIR}/ssd_vlm/sampling/generate_samples.py" \
+        --config "${ABLATION_CONFIG_DIR}/ablation_sampling_temp.yaml" \
+        --set "generation.temperature=${TEMP}" \
+        --output_dir "${OUT_SAMPLES}" \
+        --data_path "${DATA_DIR}/perception_test" \
+        || echo "Note: Ablation sampling requires actual data"
+    if [ -f "${OUT_SAMPLES}/samples.jsonl" ]; then
+        torchrun --nproc_per_node="${NUM_GPUS}" \
+            "${PROJECT_DIR}/ssd_vlm/training/train_lora.py" \
+            --config "${ABLATION_CONFIG_DIR}/ablation_lora_only.yaml" \
+            --samples_path "${OUT_SAMPLES}/samples.jsonl" \
+            --output_dir "${OUT_CKPT}" \
+            || echo "Note: LoRA training requires GPU"
+        if [ -d "${OUT_CKPT}/merged" ]; then
+            python "${PROJECT_DIR}/eval/eval_ovo_bench.py" \
+                --config "${PROJECT_DIR}/configs/eval_ovo_ssd.yaml" \
+                --model_path "${OUT_CKPT}/merged" \
+                --data_path "${DATA_DIR}/ovo_bench" \
+                --output_file "${RESULTS_DIR}/ablation_sampling_temp_${SAFE_TEMP}.json" \
+                || echo "Note: Evaluation requires OVO-Bench data"
+        fi
+    fi
+done
+
+echo ""
+echo "=========================================="
+echo "Ablation 11: Sampling Top-k Sweep"
+echo "=========================================="
+echo "Testing: sensitivity to SSD sampling top-k (5 / 10 / 20 / 50)"
+echo ""
+
+for TOPK in 5 10 20 50; do
+    OUT_SAMPLES="${OUTPUT_DIR}/ablation_topk_${TOPK}_samples"
+    OUT_CKPT="${OUTPUT_DIR}/ablation_topk_${TOPK}_lora"
+    python "${PROJECT_DIR}/ssd_vlm/sampling/generate_samples.py" \
+        --config "${ABLATION_CONFIG_DIR}/ablation_topk.yaml" \
+        --set "generation.top_k=${TOPK}" \
+        --output_dir "${OUT_SAMPLES}" \
+        --data_path "${DATA_DIR}/perception_test" \
+        || echo "Note: Ablation sampling requires actual data"
+    if [ -f "${OUT_SAMPLES}/samples.jsonl" ]; then
+        torchrun --nproc_per_node="${NUM_GPUS}" \
+            "${PROJECT_DIR}/ssd_vlm/training/train_lora.py" \
+            --config "${ABLATION_CONFIG_DIR}/ablation_lora_only.yaml" \
+            --samples_path "${OUT_SAMPLES}/samples.jsonl" \
+            --output_dir "${OUT_CKPT}" \
+            || echo "Note: LoRA training requires GPU"
+        if [ -d "${OUT_CKPT}/merged" ]; then
+            python "${PROJECT_DIR}/eval/eval_ovo_bench.py" \
+                --config "${PROJECT_DIR}/configs/eval_ovo_ssd.yaml" \
+                --model_path "${OUT_CKPT}/merged" \
+                --data_path "${DATA_DIR}/ovo_bench" \
+                --output_file "${RESULTS_DIR}/ablation_topk_${TOPK}.json" \
+                || echo "Note: Evaluation requires OVO-Bench data"
+        fi
+    fi
+done
+
+echo ""
+echo "=========================================="
+echo "Ablation 12: Oversample Ratio Sweep"
+echo "=========================================="
+echo "Testing: optimal memory-skill oversample ratio (1.0 / 1.5 / 2.0 / 3.0 / 4.0)"
+echo ""
+
+for RATIO in 1.0 1.5 2.0 3.0 4.0; do
+    SAFE_RATIO="${RATIO//./_}"
+    OUT_SAMPLES="${OUTPUT_DIR}/ablation_oversample_${SAFE_RATIO}_samples"
+    OUT_CKPT="${OUTPUT_DIR}/ablation_oversample_${SAFE_RATIO}_lora"
+    python "${PROJECT_DIR}/ssd_vlm/sampling/generate_samples.py" \
+        --config "${ABLATION_CONFIG_DIR}/ablation_oversample_ratio.yaml" \
+        --set "data.memory_skill_oversample_ratio=${RATIO}" \
+        --output_dir "${OUT_SAMPLES}" \
+        --data_path "${DATA_DIR}/perception_test" \
+        || echo "Note: Ablation sampling requires actual data"
+    if [ -f "${OUT_SAMPLES}/samples.jsonl" ]; then
+        torchrun --nproc_per_node="${NUM_GPUS}" \
+            "${PROJECT_DIR}/ssd_vlm/training/train_lora.py" \
+            --config "${ABLATION_CONFIG_DIR}/ablation_lora_only.yaml" \
+            --samples_path "${OUT_SAMPLES}/samples.jsonl" \
+            --output_dir "${OUT_CKPT}" \
+            || echo "Note: LoRA training requires GPU"
+        if [ -d "${OUT_CKPT}/merged" ]; then
+            python "${PROJECT_DIR}/eval/eval_ovo_bench.py" \
+                --config "${PROJECT_DIR}/configs/eval_ovo_ssd.yaml" \
+                --model_path "${OUT_CKPT}/merged" \
+                --data_path "${DATA_DIR}/ovo_bench" \
+                --output_file "${RESULTS_DIR}/ablation_oversample_${SAFE_RATIO}.json" \
+                || echo "Note: Evaluation requires OVO-Bench data"
+        fi
+    fi
+done
+
+echo ""
+echo "=========================================="
 echo "Generate Ablation Figures"
 echo "=========================================="
 echo ""

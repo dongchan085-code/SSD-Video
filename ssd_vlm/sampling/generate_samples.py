@@ -225,17 +225,38 @@ def main():
                        help="Number of samples to generate (default: all)")
     parser.add_argument("--data_path", type=str, default="./data/perception_test",
                        help="Path to Perception Test data")
-    
+    parser.add_argument(
+        "--set", dest="overrides", action="append", default=[],
+        metavar="section.key=value",
+        help="Override a config value, e.g. --set generation.temperature=1.2 (repeatable)",
+    )
+
     args = parser.parse_args()
-    
+
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    
-    # Load config
+
+    # Load config and apply any --set overrides
     config = load_config(args.config)
+    for override in args.overrides:
+        if "=" not in override:
+            raise ValueError(f"--set override must be section.key=value, got: {override!r}")
+        key_path, raw_val = override.split("=", 1)
+        parts = key_path.split(".")
+        node = config
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        # Try numeric coercion; fall back to string.
+        try:
+            node[parts[-1]] = int(raw_val)
+        except ValueError:
+            try:
+                node[parts[-1]] = float(raw_val)
+            except ValueError:
+                node[parts[-1]] = raw_val
     logger.info(f"Loaded config from {args.config}")
     
     # Create output directory
@@ -254,7 +275,6 @@ def main():
         recent_frames_only=config["data"].get("recent_frames_only"),
         chunk_duration=config["data"].get("chunk_duration", 1.0),
         fps=config["data"].get("fps", 1.0),
-        enable_cache=True,
     )
     
     # Create generator

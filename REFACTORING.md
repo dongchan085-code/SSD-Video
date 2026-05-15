@@ -25,7 +25,9 @@ Cross-reference: `wiki.md` (file-level inventory). Items below are ordered by RO
 | R9 | done | YAML profile `configs/_t4_nf4_sdpa.yaml`; `eval_ovo_base.yaml` and `sample_generation.yaml` extend it. Chose YAML inheritance over a Python `QuantizationProfile` module because the duplication was config-side, not Python. |
 | R7 | done | `video_utils.load_video_frames_dual` decodes once and returns both tensor + PIL frames. The 3 dataset classes (`OVOBenchDataset`, `SSDSampleDataset`, `PerceptionTestDataset`) now decode each video once per item instead of twice. |
 | R6 | deferred | Skipped for now — trainer code can't be validated without GPU; FullFTTrainer is ablation-only so risk/reward unfavorable until P3. |
-| R10–R12 | pending | see priorities below |
+| R10 | done | `run_ablations.sh` extended with ablations 10–12 (sampling temp / top-k / oversample ratio sweeps); `generate_samples.py` gained `--set section.key=value` CLI override |
+| R11 | done | `tests/compare_1pct.py` parameterized with positional CLI args; defaults retained |
+| R12 | pending | `test_train_lora_smoke.py` still needs GPU; precomputed-frames path covered by `test_precomputed_frames.py` |
 
 ## Priority 1 — High-ROI deduplication (do first)
 
