@@ -92,6 +92,64 @@ Important correction from the 14:05 KST monitor check:
 - `scripts/precompute_ovo_simplestream_frames.py` was started against the already-extracted mp4s with `--delete-videos-after-cache` to recover space.
 - The wrapper was then changed so the default path is streaming precompute via `scripts/stream_precompute_ovo_chunked.py`; the old two-stage path is now behind `-UseTwoStageExtraction`.
 
+## 2026-05-18 Bootstrap Completion
+
+The streaming precompute run completed successfully:
+
+- Log: `logs/stream_precompute_ovo_full_20260518_143427.out.log`
+- Summary: `selected=3035`, `cached=2120`, `skipped=915`, `failed=0`, `missing=0`
+- Final cache coverage: 3035 directories with `meta.json` under `D:/ssd_video_data/chunked_frames`
+- Remaining `D:/ssd_video_data/chunked_videos` mp4 files: 0
+- Remaining `D:/ssd_video_data/_chunked_parts` files: 0
+- D: free space after bootstrap: about 136 GB
+
+Dataset/cache preflight:
+
+```text
+OVOBenchDataset rows: 3035
+First sample: video_id=0, frame_images=4, first frame size=(896, 672)
+```
+
+Smoke eval:
+
+- Command used the full officialdeps config with `--max_samples 3`.
+- Output: `results/ovo_simplestream_fullset/qwen3vl8b_int8_full_precomputed4_qwen3builder_t4_officialdeps_smoke3.json`
+- Result: 3 / 3 samples completed, overall accuracy 33.33%.
+- The smoke wrote 3 rows to the canonical partial file, and the full eval resumed from those rows.
+
+## 2026-05-18 Full Eval Run
+
+Started at about 2026-05-18 15:33 KST:
+
+```powershell
+conda run --no-capture-output -p D:\conda_envs\env_ssd_simplestream_officialdeps python -u eval\eval_ovo_bench.py `
+  --config configs\eval_ovo_full_precomputed4_t4_int8_qwen3builder_officialdeps.yaml `
+  --model_path Qwen/Qwen3-VL-8B-Instruct `
+  --data_path D:/ssd_video_data `
+  --output_file results/ovo_simplestream_fullset/qwen3vl8b_int8_full_precomputed4_qwen3builder_t4_officialdeps.json `
+  --sample_ratio 1.0
+```
+
+Live logs:
+
+- `logs/eval_ovo_full_qwen3_officialdeps_20260518_153338.err.log`
+- `logs/eval_ovo_full_qwen3_officialdeps_20260518_153338.out.log`
+
+Partial/result files:
+
+- `results/ovo_simplestream_fullset/qwen3vl8b_int8_full_precomputed4_qwen3builder_t4_officialdeps.partial_predictions.jsonl`
+- `results/ovo_simplestream_fullset/qwen3vl8b_int8_full_precomputed4_qwen3builder_t4_officialdeps.json`
+
+Initial monitor check at 2026-05-18 15:36 KST:
+
+- Partial rows: 19 / 3035
+- Pending: 3016
+- Correct so far: 8
+- Cumulative accuracy so far: 42.11%
+- Last completed `video_id`: 18
+- GPU memory: about 15.2 GB on T4
+- TQDM estimate: about 6-8 hours remaining after model load
+
 ## Expected Eval Command After Bootstrap
 
 Run after `D:/ssd_video_data/chunked_frames` contains precomputed caches for all 3035 query units:
