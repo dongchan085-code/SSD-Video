@@ -160,6 +160,8 @@ No `pytest.ini`/`conftest.py`/`pyproject.toml`. Coverage gaps: **no test exercis
 
 ## Packaging
 
+Qwen3 SimpleStream reproduction uses `D:\conda_envs\env_ssd_simplestream_officialdeps` and `requirements-qwen3-officialdeps.txt`, which pins `transformers==4.57.6` and `accelerate==1.12.0`.
+
 `setup.py`: package `ssd-vlm` v0.1.0. Install deps: `transformers≥4.51`, `peft≥0.11`, `deepspeed≥0.14`, `pydantic`, `pyyaml`, `numpy`, `opencv-python-headless`, `Pillow`, `tqdm`, `accelerate`. `requirements.txt` adds experiment/dev packages such as `qwen-vl-utils`, `datasets`, `bitsandbytes`, `safetensors`, `pandas`, `scipy`, `scikit-learn`, plotting, notebook, and lint/test tools. Extras: `dev` (pytest, pytest-cov, black, isort, flake8), `viz` (matplotlib, seaborn). **Torch/torchvision/torchaudio NOT in requirements** — server has them pre-installed. No console-script entry points; everything runs via `python <path>` or `torchrun`.
 
 ---
@@ -193,7 +195,9 @@ HF model cache lives on D:\ too (`D:\hf_cache\`) via `HF_HOME` env var. **Set `H
 
 ### SimpleStream Qwen3 Reproduction Notes
 
-The official `EvolvingLMMs-Lab/SimpleStream` Qwen3 OVO path does not use the plain Qwen `apply_chat_template(... add_generation_prompt=True)` path. It encodes the selected frames first, emits one explicit `<|vision_start|>...<|vision_end|>` block per frame, computes Qwen3 rope position IDs manually, then calls `generate` from `inputs_embeds`. Use `inference.simplestream_qwen3_per_frame_builder: true` to enable that path. `configs/eval_ovo_hld_precomputed4_t4_int8_qwen3builder.yaml` replays the C:\ 4-frame HLD PNG cache with this builder and `max_new_tokens: 256`; model/HF cache still belongs on D:\.
+Use `conda run -p D:\conda_envs\env_ssd_simplestream_officialdeps ...` for Qwen3 SimpleStream reproduction. The retired C:\ `env_ssd_simplestream` env used `transformers 5.8.0` / `accelerate 1.13.0` and reproduced HLD at only 44.62%; the official-deps env reproduces HLD at 53.76%.
+
+The official `EvolvingLMMs-Lab/SimpleStream` Qwen3 OVO path does not use the plain Qwen `apply_chat_template(... add_generation_prompt=True)` path. It encodes the selected frames first, emits one explicit `<|vision_start|>...<|vision_end|>` block per frame, computes Qwen3 rope position IDs manually, then calls `generate` from `inputs_embeds`. Use `inference.simplestream_qwen3_per_frame_builder: true` to enable that path. `configs/eval_ovo_hld_precomputed4_t4_int8_qwen3builder_officialdeps.yaml` replays the C:\ 4-frame HLD PNG cache with this builder and `max_new_tokens: 256`; model/HF cache still belongs on D:\.
 
 ## Known rough edges
 

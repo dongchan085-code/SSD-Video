@@ -168,8 +168,13 @@ helpers to compare against the published OVO-Bench paper numbers.
 ### Pre-requisites
 
 ```bash
-# Conda env with torch, transformers, qwen-vl-utils, bitsandbytes, imageio-ffmpeg, etc.
-conda activate env_ssd_simplestream     # name used in the snippets below
+# Conda env with torch, Qwen3 official transformers/accelerate pins,
+# qwen-vl-utils, bitsandbytes, imageio-ffmpeg, etc.
+conda activate D:/conda_envs/env_ssd_simplestream_officialdeps
+
+# If rebuilding the env, install a CUDA-compatible torch build first, then:
+python -m pip install -r requirements-qwen3-officialdeps.txt
+python -m pip install -e .
 
 # All large artifacts (OVO videos, model weights) go to D:\ to keep C:\ free.
 # Set HF_HOME so the model lands on D:\ not the default user cache.

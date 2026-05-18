@@ -22,26 +22,32 @@ runs on real OVO-Bench videos without downloading the 142GB pre-chunked archive.
 The source-video archive is about 43.16GB, so it fits the 100GB `D:` limit.
 
 ```powershell
+# Use the Qwen3 official-dependency env. The old C:\Users\...\env_ssd_simplestream
+# env is intentionally not used for SimpleStream/Qwen3 reproduction.
+$CondaEnv = "D:\conda_envs\env_ssd_simplestream_officialdeps"
+
 # Annotation only; already enough to inspect 1%/10% subset sizes.
-conda run -n env_ssd_simplestream python scripts/download_ovo_sources.py `
+conda run -p $CondaEnv python scripts/download_ovo_sources.py `
   --data_root D:/ssd_video_data `
   --skip_parts
 
 # Download the 43.16GB source-video parts once, then prepare the 1% subset.
-.\scripts\prepare_ovo_subset_pipeline.ps1 -Ratio 0.01 -DownloadParts
+.\scripts\prepare_ovo_subset_pipeline.ps1 -Ratio 0.01 -DownloadParts -CondaEnv $CondaEnv
 
 # Run the baseline on the 1% subset.
 .\scripts\run_simplestream_baseline.ps1 `
   -DataDir D:\ssd_video_data\ovo_subset_1pct `
   -Config .\configs\eval_ovo_subset_1pct_base.yaml `
-  -ResultsDir .\results
+  -ResultsDir .\results `
+  -CondaEnv $CondaEnv
 
 # If the 1% run is healthy, reuse the downloaded parts for the 10% subset.
-.\scripts\prepare_ovo_subset_pipeline.ps1 -Ratio 0.10
+.\scripts\prepare_ovo_subset_pipeline.ps1 -Ratio 0.10 -CondaEnv $CondaEnv
 .\scripts\run_simplestream_baseline.ps1 `
   -DataDir D:\ssd_video_data\ovo_subset_10pct `
   -Config .\configs\eval_ovo_subset_10pct_base.yaml `
-  -ResultsDir .\results
+  -ResultsDir .\results `
+  -CondaEnv $CondaEnv
 ```
 
 ### 3. Generate Figures (with mock data)

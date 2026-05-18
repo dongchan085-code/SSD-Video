@@ -1,7 +1,7 @@
 param(
     [double]$Ratio = 0.01,
     [string]$DataRoot = "D:\ssd_video_data",
-    [string]$CondaEnv = "env_ssd_simplestream",
+    [string]$CondaEnv = "D:\conda_envs\env_ssd_simplestream_officialdeps",
     [switch]$DownloadParts,
     [switch]$OverwriteChunks
 )
@@ -17,6 +17,16 @@ function Invoke-CondaChecked {
     }
 }
 
+function Get-CondaRunArgs {
+    param([string]$EnvOrPrefix)
+    if ($EnvOrPrefix -match "^[A-Za-z]:\\" -or $EnvOrPrefix.StartsWith("/") -or $EnvOrPrefix.StartsWith("\")) {
+        return @("run", "-p", $EnvOrPrefix)
+    }
+    return @("run", "-n", $EnvOrPrefix)
+}
+
+$CondaRun = Get-CondaRunArgs $CondaEnv
+
 if ($Ratio -eq 0.01) {
     $SubsetName = "ovo_subset_1pct"
 } elseif ($Ratio -eq 0.10) {
@@ -31,8 +41,8 @@ $SubsetDir = Join-Path $DataRoot $SubsetName
 $SrcDir = Join-Path $SubsetDir "src_videos"
 $ChunkDir = Join-Path $SubsetDir "chunked_videos"
 
-$downloadArgs = @(
-    "run", "-n", $CondaEnv, "python", "-u", "$ProjectDir\scripts\download_ovo_sources.py",
+$downloadArgs = @($CondaRun) + @(
+    "python", "-u", "$ProjectDir\scripts\download_ovo_sources.py",
     "--data_root", $DataRoot,
     "--parts_dir", $PartsDir,
     "--anno_path", $AnnoPath,
@@ -43,28 +53,28 @@ if (-not $DownloadParts) {
 }
 Invoke-CondaChecked $downloadArgs
 
-Invoke-CondaChecked @(
-    "run", "-n", $CondaEnv, "python", "-u", "$ProjectDir\scripts\prepare_ovo_subset.py",
+Invoke-CondaChecked (@($CondaRun) + @(
+    "python", "-u", "$ProjectDir\scripts\prepare_ovo_subset.py",
     "--anno_path", $AnnoPath,
     "--output_dir", $SubsetDir,
     "--ratio", "$Ratio",
     "--seed", "42",
     "--min_per_task", "1"
-)
+))
 
 if (-not (Get-ChildItem -Path $PartsDir -Filter "src_videos.tar.part*" -ErrorAction SilentlyContinue)) {
     throw "No source-video tar parts found in $PartsDir. Re-run with -DownloadParts once, then retry."
 }
 
-Invoke-CondaChecked @(
-    "run", "-n", $CondaEnv, "python", "-u", "$ProjectDir\scripts\extract_ovo_src_subset.py",
+Invoke-CondaChecked (@($CondaRun) + @(
+    "python", "-u", "$ProjectDir\scripts\extract_ovo_src_subset.py",
     "--parts_dir", $PartsDir,
     "--required_sources", "$SubsetDir\required_sources.txt",
     "--output_dir", $SrcDir
-)
+))
 
-$chunkArgs = @(
-    "run", "-n", $CondaEnv, "python", "-u", "$ProjectDir\scripts\chunk_ovo_subset.py",
+$chunkArgs = @($CondaRun) + @(
+    "python", "-u", "$ProjectDir\scripts\chunk_ovo_subset.py",
     "--anno_path", "$SubsetDir\ovo_bench_subset.json",
     "--src_dir", $SrcDir,
     "--output_dir", $ChunkDir

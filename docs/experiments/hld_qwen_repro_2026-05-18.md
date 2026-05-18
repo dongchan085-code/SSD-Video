@@ -118,7 +118,7 @@ Partial file:
 
 - `results/ovo_simplestream_fullset/qwen3vl8b_int8_hld_precomputed4_qwen3builder_t4.partial_predictions.jsonl`
 
-Command used on 2026-05-18:
+Historical command context from 2026-05-18:
 
 ```powershell
 $env:PYTHONPATH='C:/work/SSD-Video'
@@ -129,13 +129,8 @@ $env:HF_HUB_DISABLE_SYMLINKS_WARNING='1'
 $env:FORCE_QWENVL_VIDEO_READER='decord'
 $env:PYTHONIOENCODING='utf-8'
 New-Item -ItemType Directory -Force -Path D:/hf_cache | Out-Null
-conda run -n env_ssd_simplestream python -u eval/eval_ovo_bench.py `
-  --config configs/eval_ovo_hld_precomputed4_t4_int8_qwen3builder.yaml `
-  --model_path Qwen/Qwen3-VL-8B-Instruct `
-  --data_path C:/work/SSD-Video/data/ovo_hld_recent4 `
-  --output_file results/ovo_simplestream_fullset/qwen3vl8b_int8_hld_precomputed4_qwen3builder_t4.json `
-  --task_filter HLD `
-  --sample_ratio 1.0
+# The original low-score run used the now-retired C:/Users/swsuser-j07/.conda/envs/env_ssd_simplestream env.
+# Do not rerun that environment; use the official-dependency rerun command later in this document.
 ```
 
 Final status:
@@ -170,12 +165,12 @@ nvidia-smi
 The final output JSON now exists. Re-run the following diagnostics if the file is regenerated:
 
 ```powershell
-conda run -n env_ssd_simplestream python scripts/diagnose_hld_repro.py audit-results `
+conda run -p D:\conda_envs\env_ssd_simplestream_officialdeps python scripts/diagnose_hld_repro.py audit-results `
   --result-path results/ovo_simplestream_fullset/qwen3vl8b_int8_hld_precomputed4_qwen3builder_t4.json `
   --task HLD `
   --paper-accuracy 52.1
 
-conda run -n env_ssd_simplestream python scripts/diagnose_hld_repro.py score-compare `
+conda run -p D:\conda_envs\env_ssd_simplestream_officialdeps python scripts/diagnose_hld_repro.py score-compare `
   --result-path results/ovo_simplestream_fullset/qwen3vl8b_int8_hld_precomputed4_qwen3builder_t4.json `
   --task HLD
 ```
@@ -197,7 +192,7 @@ Confirmed official SimpleStream Qwen3 conditions from the upstream release:
 Current local T4 reproduction conditions:
 
 - `configs/eval_ovo_hld_precomputed4_t4_int8_qwen3builder.yaml` uses `dtype=float16`, `load_in_8bit=true`, `attn_implementation=sdpa`, one T4, and precomputed PNG replay.
-- `env_ssd_simplestream` currently reports `transformers 5.8.0`, `accelerate 1.13.0`, `torch 2.5.1`, CUDA 12.4.
+- The retired `env_ssd_simplestream` env reported `transformers 5.8.0`, `accelerate 1.13.0`, `torch 2.5.1`, CUDA 12.4 and produced the low 44.62% run.
 - This means the local run differs from the release on precision, quantization, attention backend, GPU execution mode, and Transformers/Accelerate versions.
 
 Additional observations:
@@ -224,10 +219,11 @@ Still worth checking only if exact official hardware is available:
 
 Environment:
 
-- Conda prefix: `D:/conda_envs/env_ssd_simplestream_officialdeps`
+- Conda prefix: `D:/conda_envs/env_ssd_simplestream_officialdeps` (the active Qwen3 SimpleStream reproduction env)
 - Created by cloning `env_ssd_simplestream`, then installing `transformers==4.57.6` and `accelerate==1.12.0`.
 - Verified versions: `transformers 4.57.6`, `accelerate 1.12.0`, `torch 2.5.1`, CUDA 12.4, `bitsandbytes 0.49.2`.
 - Runtime remained T4-constrained: `dtype=float16`, `load_in_8bit=true`, `attn_implementation=sdpa`, single T4, precomputed PNG replay.
+- As of 2026-05-18, the old `C:/Users/swsuser-j07/.conda/envs/env_ssd_simplestream` env is retired and should not be used for Qwen3 SimpleStream reproduction.
 
 Configuration:
 
