@@ -18,6 +18,7 @@ Before exploring the codebase for any planning or non-trivial task, read `wiki.m
 ## Experiment Notes
 
 - Before any HLD/Qwen3 SimpleStream reproduction work, read `docs/experiments/hld_qwen_repro_2026-05-18.md`. It records validated HLD baselines, diagnostics, the qwen3builder run status, and exact resume commands. Update that note whenever new HLD reproduction results are produced.
+- Before any full OVO/Qwen3 SimpleStream reproduction work, read `docs/experiments/full_ovo_qwen_repro_2026-05-18.md`. It records the full OVO bootstrap state, officialdeps config, precomputed-frame script, monitor commands, and final eval command.
 - Use `D:/conda_envs/env_ssd_simplestream_officialdeps` for Qwen3 SimpleStream reproduction. The retired `env_ssd_simplestream` environment used `transformers 5.8.0` / `accelerate 1.13.0` and caused the low HLD reproduction result.
 
 ## Git Workflow
