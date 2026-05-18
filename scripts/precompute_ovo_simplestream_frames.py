@@ -66,22 +66,16 @@ def _iter_unique_samples(dataset: OVOBenchDataset, task_type: Optional[str]) -> 
         yield sample
 
 
-def _write_one(
+def write_precomputed_cache(
     *,
-    dataset: OVOBenchDataset,
     sample: Dict[str, Any],
-    output_dir: Path,
+    video_path: Path,
+    cache_dir: Path,
     recent_frames_only: int,
     chunk_duration: float,
     fps: float,
     overwrite: bool,
-) -> Tuple[int, Path]:
-    video_path = resolve_video_path(
-        data_path=dataset.data_path,
-        video_id=sample["video_id"],
-        video_relpath=sample.get("video_relpath"),
-    )
-    cache_dir = output_dir / str(sample["video_id"])
+) -> int:
     if overwrite and cache_dir.exists():
         for child in cache_dir.iterdir():
             if child.is_file():
@@ -126,7 +120,35 @@ def _write_one(
         json.dumps(meta, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    return len(frames), video_path
+    return len(frames)
+
+
+def _write_one(
+    *,
+    dataset: OVOBenchDataset,
+    sample: Dict[str, Any],
+    output_dir: Path,
+    recent_frames_only: int,
+    chunk_duration: float,
+    fps: float,
+    overwrite: bool,
+) -> Tuple[int, Path]:
+    video_path = resolve_video_path(
+        data_path=dataset.data_path,
+        video_id=sample["video_id"],
+        video_relpath=sample.get("video_relpath"),
+    )
+    cache_dir = output_dir / str(sample["video_id"])
+    saved = write_precomputed_cache(
+        sample=sample,
+        video_path=video_path,
+        cache_dir=cache_dir,
+        recent_frames_only=recent_frames_only,
+        chunk_duration=chunk_duration,
+        fps=fps,
+        overwrite=overwrite,
+    )
+    return saved, video_path
 
 
 def main() -> None:

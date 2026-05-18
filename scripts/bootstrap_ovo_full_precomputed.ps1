@@ -4,7 +4,7 @@ param(
     [string]$CacheDir = "D:\hf_cache",
     [int]$RecentFrames = 4,
     [switch]$SkipVideoDownload,
-    [switch]$SkipPrecompute,
+    [switch]$UseTwoStageExtraction,
     [switch]$DeleteVideosAfterCache
 )
 
@@ -43,6 +43,7 @@ $AnnoPath = Join-Path $DataRoot "ovo_bench_new.json"
 $PartsDir = Join-Path $DataRoot "_chunked_parts"
 $ChunkedDir = Join-Path $DataRoot "chunked_videos"
 $FramesDir = Join-Path $DataRoot "chunked_frames"
+$StreamWorkDir = Join-Path $DataRoot "_stream_precompute_tmp"
 
 Invoke-CondaChecked (@($CondaRun) + @(
     "python", "-u", "$ProjectDir\scripts\download_ovo_sources.py",
@@ -51,16 +52,13 @@ Invoke-CondaChecked (@($CondaRun) + @(
     "--skip_parts"
 ))
 
-if (-not $SkipVideoDownload) {
+if (-not $SkipVideoDownload -and $UseTwoStageExtraction) {
     Invoke-CondaChecked (@($CondaRun) + @(
         "python", "-u", "$ProjectDir\scripts\download_extract_chunked.py",
         "--parts_dir", $PartsDir,
         "--output_dir", $ChunkedDir,
         "--max_parts_ahead", "1"
     ))
-}
-
-if (-not $SkipPrecompute) {
     $precomputeArgs = @($CondaRun) + @(
         "python", "-u", "$ProjectDir\scripts\precompute_ovo_simplestream_frames.py",
         "--data-path", $DataRoot,
@@ -75,6 +73,20 @@ if (-not $SkipPrecompute) {
         $precomputeArgs += "--delete-videos-after-cache"
     }
     Invoke-CondaChecked $precomputeArgs
+} elseif (-not $SkipVideoDownload) {
+    Invoke-CondaChecked (@($CondaRun) + @(
+        "python", "-u", "$ProjectDir\scripts\stream_precompute_ovo_chunked.py",
+        "--parts-dir", $PartsDir,
+        "--work-dir", $StreamWorkDir,
+        "--output-dir", $FramesDir,
+        "--data-path", $DataRoot,
+        "--anno-path", $AnnoPath,
+        "--chunked-dir", $ChunkedDir,
+        "--recent-frames-only", "$RecentFrames",
+        "--chunk-duration", "1.0",
+        "--fps", "1.0",
+        "--max-parts-ahead", "1"
+    ))
 }
 
 Write-Host "OVO full precomputed data ready under $DataRoot"

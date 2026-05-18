@@ -229,8 +229,8 @@ Resolved (P2):
 
 - Read `docs/experiments/full_ovo_qwen_repro_2026-05-18.md` before full OVO/Qwen3 SimpleStream reproduction work.
 - Canonical full OVO local config: `configs/eval_ovo_full_precomputed4_t4_int8_qwen3builder_officialdeps.yaml`.
-- Rebuild missing `D:/ssd_video_data` with `scripts/bootstrap_ovo_full_precomputed.ps1 -DeleteVideosAfterCache`.
-- Qwen/SimpleStream-aligned PNG replay caches are produced by `scripts/precompute_ovo_simplestream_frames.py`, which uses `_fetch_simplestream_frames` instead of cv2 extraction.
+- Rebuild missing `D:/ssd_video_data` with `scripts/bootstrap_ovo_full_precomputed.ps1`; it uses streaming precompute by default to avoid filling D: with all mp4 chunks.
+- Qwen/SimpleStream-aligned PNG replay caches are produced by `scripts/stream_precompute_ovo_chunked.py` for full bootstrap and `scripts/precompute_ovo_simplestream_frames.py` for already-extracted mp4s. Both use `_fetch_simplestream_frames` instead of cv2 extraction.
 
 ---
 

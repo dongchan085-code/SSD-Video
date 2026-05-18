@@ -51,19 +51,21 @@ Data bootstrap wrapper:
 
 - `scripts/bootstrap_ovo_full_precomputed.ps1`
 
-Qwen/SimpleStream-aligned PNG precompute script:
+Qwen/SimpleStream-aligned PNG precompute scripts:
 
 - `scripts/precompute_ovo_simplestream_frames.py`
+- `scripts/stream_precompute_ovo_chunked.py`
 
-Why a new precompute script exists:
+Why new precompute scripts exist:
 
 - `scripts/extract_chunk_frames.py` uses cv2 frame reads and is useful for generic recent-frame extraction.
 - The validated HLD reproduction used Qwen/SimpleStream exact recent decoding and Qwen-style image resizing before replay.
 - `precompute_ovo_simplestream_frames.py` uses `_fetch_simplestream_frames(...)` and writes the `meta.json` layout consumed by `OVOBenchDataset`.
+- `stream_precompute_ovo_chunked.py` is the preferred full OVO path on the T4 VM because it extracts one mp4 from the HF tar stream, writes its PNG replay cache, and deletes the temporary mp4 immediately.
 
 ## Bootstrap Command
 
-The long-running bootstrap was started at about 2026-05-18 13:51 KST:
+The first long-running bootstrap was started at about 2026-05-18 13:51 KST:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
@@ -81,6 +83,14 @@ Live logs:
 - `logs/bootstrap_ovo_full_precomputed_20260518_135146.err.log`
 
 At the first monitor check, the run had listed all 15 `chunked_videos.tar.part*` files, opened `partaa`, and started extracting into `D:/ssd_video_data/chunked_videos`.
+
+Important correction from the 14:05 KST monitor check:
+
+- The first wrapper version used a two-stage flow: extract all mp4 chunks, then precompute PNGs.
+- That is too risky on the D: disk because the extracted mp4 size was tracking the tar stream too closely and could exceed available space before PNG conversion starts.
+- The extraction was stopped at 917 mp4 files / about 53.2 GB extracted.
+- `scripts/precompute_ovo_simplestream_frames.py` was started against the already-extracted mp4s with `--delete-videos-after-cache` to recover space.
+- The wrapper was then changed so the default path is streaming precompute via `scripts/stream_precompute_ovo_chunked.py`; the old two-stage path is now behind `-UseTwoStageExtraction`.
 
 ## Expected Eval Command After Bootstrap
 
