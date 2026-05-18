@@ -7,6 +7,7 @@ Adapted from SimpleStream evaluation protocol.
 import argparse
 import json
 import logging
+import inspect
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -58,6 +59,37 @@ def _flatten_vision_features(features: Any) -> torch.Tensor:
     raise TypeError(f"Unexpected vision feature type: {type(features)}")
 
 
+def _build_qwen3_per_frame_input_ids(
+    *,
+    tokenizer: Any,
+    prompt: str,
+    tokens_per_frame: Sequence[int],
+    im_start_id: int,
+    im_end_id: int,
+    vision_start_id: int,
+    vision_end_id: int,
+    image_token_id: int,
+) -> List[int]:
+    """Build the explicit per-frame Qwen3-VL prompt used by SimpleStream."""
+    input_ids: List[int] = []
+    input_ids.append(im_start_id)
+    input_ids.extend(tokenizer.encode("user\n", add_special_tokens=False))
+    for token_count in tokens_per_frame:
+        count = int(token_count)
+        if count < 1:
+            raise ValueError(f"tokens_per_frame entries must be >= 1, got {token_count!r}")
+        input_ids.append(vision_start_id)
+        input_ids.extend([image_token_id] * count)
+        input_ids.append(vision_end_id)
+    input_ids.extend(tokenizer.encode("\n", add_special_tokens=False))
+    input_ids.extend(tokenizer.encode(prompt, add_special_tokens=False))
+    input_ids.append(im_end_id)
+    input_ids.extend(tokenizer.encode("\n", add_special_tokens=False))
+    input_ids.append(im_start_id)
+    input_ids.extend(tokenizer.encode("assistant\n", add_special_tokens=False))
+    return input_ids
+
+
 class OVOBenchEvaluator:
     """Evaluator for OVO-Bench benchmark."""
     
@@ -83,6 +115,7 @@ class OVOBenchEvaluator:
         use_cache: bool = True,
         use_simplestream_decode: bool = False,
         simplestream_single_vision_block: bool = False,
+        simplestream_qwen3_per_frame_builder: bool = False,
         use_precomputed_frames: bool = False,
         chunked_frames_dir: Optional[str] = None,
     ):
@@ -109,6 +142,7 @@ class OVOBenchEvaluator:
         self.use_cache = use_cache
         self.use_simplestream_decode = bool(use_simplestream_decode)
         self.simplestream_single_vision_block = bool(simplestream_single_vision_block)
+        self.simplestream_qwen3_per_frame_builder = bool(simplestream_qwen3_per_frame_builder)
         self.use_precomputed_frames = bool(use_precomputed_frames)
         self.chunked_frames_dir = chunked_frames_dir
 
@@ -127,14 +161,17 @@ class OVOBenchEvaluator:
         self.model.eval()
         logger.info("Model loaded successfully")
 
-        if self.simplestream_single_vision_block:
-            tok = self.processor.tokenizer
-            self._vision_start_id = tok.convert_tokens_to_ids("<|vision_start|>")
-            self._vision_end_id = tok.convert_tokens_to_ids("<|vision_end|>")
-            self._im_start_id = tok.convert_tokens_to_ids("<|im_start|>")
-            self._im_end_id = tok.convert_tokens_to_ids("<|im_end|>")
-            self._image_token_id = self.model.config.image_token_id
-            logger.info("SimpleStream single-vision-block encoding enabled")
+        if self.simplestream_qwen3_per_frame_builder and self.simplestream_single_vision_block:
+            logger.warning(
+                "Both qwen3_per_frame_builder and single_vision_block are enabled; "
+                "using the official Qwen3 per-frame builder."
+            )
+        if self.simplestream_qwen3_per_frame_builder or self.simplestream_single_vision_block:
+            self._init_explicit_vision_token_ids()
+            if self.simplestream_qwen3_per_frame_builder:
+                logger.info("SimpleStream Qwen3 per-frame explicit builder enabled")
+            else:
+                logger.info("SimpleStream single-vision-block encoding enabled")
 
         # Task definitions
         # Temporal Lock tasks: real-time perception (sharp distributions needed)
@@ -171,6 +208,75 @@ class OVOBenchEvaluator:
             use_precomputed_frames=self.use_precomputed_frames,
             chunked_frames_dir=self.chunked_frames_dir,
         )
+
+    def _get_hf_model(self) -> Any:
+        return self.model.get_base_model() if hasattr(self.model, "get_base_model") else self.model
+
+    def _get_text_model(self) -> Any:
+        hf_model = self._get_hf_model()
+        return hf_model.model if hasattr(hf_model, "model") else hf_model
+
+    def _get_visual_module(self) -> Any:
+        hf_model = self._get_hf_model()
+        if hasattr(hf_model, "visual"):
+            return hf_model.visual
+        if hasattr(hf_model, "model") and hasattr(hf_model.model, "visual"):
+            return hf_model.model.visual
+        raise AttributeError("Could not find Qwen visual module on the loaded model")
+
+    def _get_image_feature_model(self) -> Any:
+        hf_model = self._get_hf_model()
+        if hasattr(hf_model, "get_image_features"):
+            return hf_model
+        if hasattr(hf_model, "model") and hasattr(hf_model.model, "get_image_features"):
+            return hf_model.model
+        raise AttributeError("Could not find get_image_features on the loaded model")
+
+    def _model_device(self) -> torch.device:
+        device = getattr(self.model, "device", None)
+        if device is not None:
+            return torch.device(device)
+        for parameter in self.model.parameters():
+            return parameter.device
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def _init_explicit_vision_token_ids(self) -> None:
+        tokenizer = self.processor.tokenizer
+        self._vision_start_id = tokenizer.convert_tokens_to_ids("<|vision_start|>")
+        self._vision_end_id = tokenizer.convert_tokens_to_ids("<|vision_end|>")
+        self._im_start_id = tokenizer.convert_tokens_to_ids("<|im_start|>")
+        self._im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+        self._image_token_id = self._get_hf_model().config.image_token_id
+        self._merge_size = int(getattr(self._get_visual_module(), "spatial_merge_size", 1))
+
+    def _get_rope_position_ids(
+        self,
+        *,
+        input_ids: torch.Tensor,
+        image_grid_thw: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        text_model = self._get_text_model()
+        kwargs: Dict[str, Any] = {
+            "input_ids": input_ids,
+            "image_grid_thw": image_grid_thw,
+            "video_grid_thw": None,
+            "attention_mask": attention_mask,
+        }
+        try:
+            signature = inspect.signature(text_model.get_rope_index)
+        except (TypeError, ValueError):
+            signature = None
+        if signature is not None and "mm_token_type_ids" in signature.parameters:
+            mm_token_type_ids = torch.zeros_like(input_ids, dtype=torch.int32)
+            mm_token_type_ids[input_ids == self._image_token_id] = 1
+            kwargs["mm_token_type_ids"] = mm_token_type_ids
+        try:
+            position_ids, _ = text_model.get_rope_index(**kwargs)
+        except TypeError:
+            kwargs.pop("mm_token_type_ids", None)
+            position_ids, _ = text_model.get_rope_index(**kwargs)
+        return position_ids
     
     @torch.no_grad()
     def _generate_answer(
@@ -207,6 +313,16 @@ class OVOBenchEvaluator:
             frame_iter = frames
         else:
             frame_iter = [frames]
+
+        if self.simplestream_qwen3_per_frame_builder:
+            return self._generate_answer_qwen3_per_frame_builder(
+                prompt=prompt,
+                frames=frame_iter,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                do_sample=do_sample,
+            )
 
         if self.simplestream_single_vision_block:
             return self._generate_answer_single_block(
@@ -262,6 +378,100 @@ class OVOBenchEvaluator:
         return answer.strip()
 
     @torch.no_grad()
+    def _generate_answer_qwen3_per_frame_builder(
+        self,
+        prompt: str,
+        frames: List[Any],
+        temperature: float,
+        top_k: int,
+        top_p: float,
+        do_sample: bool,
+    ) -> str:
+        """Official SimpleStream Qwen3-VL explicit per-frame builder.
+
+        Mirrors EvolvingLMMs-Lab/SimpleStream `recent_window_eval_qwen3.py`:
+        preprocess all selected frames together, split vision-token counts by
+        `image_grid_thw`, emit one `<|vision_start|>...<|vision_end|>` block
+        per frame, then call `get_rope_index` explicitly before generation.
+        """
+        device = self._model_device()
+        tokenizer = self.processor.tokenizer
+
+        image_content = [{"type": "image", "image": frame} for frame in frames]
+        enc_messages = [{
+            "role": "user",
+            "content": image_content + [{"type": "text", "text": "."}],
+        }]
+        enc_inputs = self.processor.apply_chat_template(
+            enc_messages,
+            tokenize=True,
+            add_generation_prompt=False,
+            return_dict=True,
+            return_tensors="pt",
+        )
+        pixel_values = enc_inputs["pixel_values"].to(device)
+        image_grid_thw = enc_inputs["image_grid_thw"].to(device)
+        vision_features = self._get_image_feature_model().get_image_features(pixel_values, image_grid_thw)
+        vision_embeds = _flatten_vision_features(vision_features)
+
+        merge_area = max(1, int(self._merge_size)) ** 2
+        tokens_per_frame = [
+            max(1, int(row[0].item() * row[1].item() * row[2].item()) // merge_area)
+            for row in image_grid_thw
+        ]
+        expected_tokens = sum(tokens_per_frame)
+        if expected_tokens != int(vision_embeds.shape[0]):
+            raise ValueError(
+                "vision token count mismatch: "
+                f"embeds={int(vision_embeds.shape[0])} vs grid={expected_tokens}"
+            )
+
+        input_ids_list = _build_qwen3_per_frame_input_ids(
+            tokenizer=tokenizer,
+            prompt=prompt,
+            tokens_per_frame=tokens_per_frame,
+            im_start_id=self._im_start_id,
+            im_end_id=self._im_end_id,
+            vision_start_id=self._vision_start_id,
+            vision_end_id=self._vision_end_id,
+            image_token_id=self._image_token_id,
+        )
+        input_ids = torch.tensor([input_ids_list], dtype=torch.long, device=device)
+        attention_mask = torch.ones_like(input_ids)
+        prompt_length = int(input_ids.shape[1])
+
+        text_model = self._get_text_model()
+        inputs_embeds = text_model.get_input_embeddings()(input_ids)
+        vision_embeds = vision_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+        image_mask = input_ids == self._image_token_id
+        image_mask_expanded = image_mask.unsqueeze(-1).expand_as(inputs_embeds)
+        inputs_embeds = inputs_embeds.masked_scatter(image_mask_expanded, vision_embeds)
+
+        position_ids = self._get_rope_position_ids(
+            input_ids=input_ids,
+            image_grid_thw=image_grid_thw,
+            attention_mask=attention_mask,
+        )
+
+        output_ids = self.model.generate(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            max_new_tokens=self.max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            do_sample=do_sample,
+            use_cache=self.use_cache,
+        )
+
+        if output_ids.shape[1] > prompt_length:
+            generated_ids = output_ids[0][prompt_length:]
+        else:
+            generated_ids = output_ids[0]
+        return self.processor.decode(generated_ids, skip_special_tokens=True).strip()
+
+    @torch.no_grad()
     def _generate_answer_single_block(
         self,
         prompt: str,
@@ -271,15 +481,14 @@ class OVOBenchEvaluator:
         top_p: float,
         do_sample: bool,
     ) -> str:
-        """SimpleStream's single-vision-block encoding path.
+        """Legacy single-vision-block encoding path.
 
         Mirrors lib/recent_window_eval.RecentWindowQAModel: encode frames via the
         processor once to get pixel_values + image_grid_thw, run vision encoder
         to obtain vision embeddings, then hand-build the input sequence with a
         SINGLE ``<|vision_start|>...<|vision_end|>`` block containing all frame
-        tokens. The default apply_chat_template path emits one vision block
-        per frame, which breaks temporal continuity for long-horizon tasks
-        like HLD.
+        tokens. The Qwen3 SimpleStream release uses
+        `_generate_answer_qwen3_per_frame_builder`; keep this as an ablation.
         """
         device = self.model.device
 
@@ -299,8 +508,7 @@ class OVOBenchEvaluator:
         pixel_values = enc_inputs["pixel_values"].to(device)
         image_grid_thw = enc_inputs["image_grid_thw"].to(device)
 
-        feature_module = self.model if hasattr(self.model, "get_image_features") else self.model.model
-        vision_features = feature_module.get_image_features(pixel_values, image_grid_thw)
+        vision_features = self._get_image_feature_model().get_image_features(pixel_values, image_grid_thw)
         vision_embeds = _flatten_vision_features(vision_features)
 
         num_vision_tokens = int(vision_embeds.shape[0])
@@ -326,22 +534,16 @@ class OVOBenchEvaluator:
         attention_mask = torch.ones_like(input_ids)
         prompt_length = int(input_ids.shape[1])
 
-        inputs_embeds = self.model.get_input_embeddings()(input_ids)
+        text_model = self._get_text_model()
+        inputs_embeds = text_model.get_input_embeddings()(input_ids)
         vision_embeds = vision_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
         image_mask = input_ids == self._image_token_id
         image_mask_expanded = image_mask.unsqueeze(-1).expand_as(inputs_embeds)
         inputs_embeds = inputs_embeds.masked_scatter(image_mask_expanded, vision_embeds)
 
-        multimodal_model = self.model.model
-        # Qwen3-VL (transformers 5.x) requires mm_token_type_ids: 0=text, 1=image, 2=video.
-        # In 5.x, get_rope_index runs an itertools.groupby over mm_token_type_ids
-        # and consumes exactly ONE image_grid_thw row per consecutive image group.
-        # SimpleStream's single-vision-block trick (all N frames' image tokens in
-        # a single <|vision_start|>...<|vision_end|>) collapses to one image
-        # group, so we must also collapse image_grid_thw 4-rows-of-[1,H,W] into
-        # a single [N,H,W] row so the rope positions cover all vision tokens.
-        mm_token_type_ids = torch.zeros_like(input_ids, dtype=torch.int32)
-        mm_token_type_ids[input_ids == self._image_token_id] = 1
+        # In transformers 5.x, get_rope_index consumes exactly one image_grid_thw
+        # row per consecutive image token group. A single vision block therefore
+        # needs a collapsed [N,H,W] row.
         unique_hw = torch.unique(image_grid_thw[:, 1:], dim=0)
         if unique_hw.shape[0] == 1:
             t_total = int(image_grid_thw[:, 0].sum().item())
@@ -355,11 +557,9 @@ class OVOBenchEvaluator:
                 "single-vision-block path requires all frames to share the same h,w; "
                 f"got image_grid_thw={image_grid_thw.tolist()}"
             )
-        position_ids, _ = multimodal_model.get_rope_index(
+        position_ids = self._get_rope_position_ids(
             input_ids=input_ids,
-            mm_token_type_ids=mm_token_type_ids,
             image_grid_thw=combined_grid_thw,
-            video_grid_thw=None,
             attention_mask=attention_mask,
         )
 
@@ -517,6 +717,8 @@ class OVOBenchEvaluator:
                 "top_p": top_p,
                 "do_sample": do_sample,
                 "use_cache": self.use_cache,
+                "simplestream_qwen3_per_frame_builder": self.simplestream_qwen3_per_frame_builder,
+                "simplestream_single_vision_block": self.simplestream_single_vision_block,
             },
             streaming_meta={
                 "recent_frames_only": self.recent_frames_only,
@@ -599,6 +801,9 @@ def main():
         use_simplestream_decode=config["inference"].get("use_simplestream_decode", False),
         simplestream_single_vision_block=config["inference"].get(
             "simplestream_single_vision_block", False
+        ),
+        simplestream_qwen3_per_frame_builder=config["inference"].get(
+            "simplestream_qwen3_per_frame_builder", False
         ),
         use_precomputed_frames=config["data"].get("use_precomputed_frames", False),
         chunked_frames_dir=config["data"].get("chunked_frames_dir"),

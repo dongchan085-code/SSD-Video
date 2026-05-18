@@ -15,6 +15,10 @@ Evaluation benchmark: **OVO-Bench**, with three task groups:
 
 Before exploring the codebase for any planning or non-trivial task, read `wiki.md` at the repo root. It maps every module, public API, entry point, and config path — so you can skip re-running file searches. If `wiki.md` is wrong or stale (file moved, API renamed), fix it as part of the same change. Refactoring backlog lives in `REFACTORING.md`.
 
+## Experiment Notes
+
+- Before any HLD/Qwen3 SimpleStream reproduction work, read `docs/experiments/hld_qwen_repro_2026-05-18.md`. It records validated HLD baselines, diagnostics, the qwen3builder run status, and exact resume commands. Update that note whenever new HLD reproduction results are produced.
+
 ## Git Workflow
 
 - 별도 브랜치 생성 금지 — 항상 `main`에서 직접 작업한다.

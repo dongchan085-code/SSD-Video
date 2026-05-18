@@ -88,7 +88,7 @@ JSONL is written incrementally (every 100 batches) — survives interruption. Th
 | `ssd_vlm/sampling/generate_samples.py --config …` | 1 | `sample_generation.yaml` |
 | `ssd_vlm/training/train_lora.py --config …` | 2 | `train_lora.yaml` |
 | `ssd_vlm/training/train_full_ft.py --config …` | 2 (ablation) | `train_full_ft.yaml` |
-| `eval/eval_ovo_bench.py --config …` | 3 | `eval_ovo_{base,ssd,base_1pct_t4,…}.yaml` |
+| `eval/eval_ovo_bench.py --config …` | 3 | `eval_ovo_{base,ssd,base_1pct_t4,…}.yaml`; SimpleStream Qwen3 parity uses `inference.simplestream_qwen3_per_frame_builder: true` |
 | `eval/eval_frame_sweep.py` | 3 sweep | `eval_ovo_frame_sweep.yaml` |
 | `eval/eval_temperature_sweep.py` | 3 sweep | `eval_temperature_sweep.yaml` |
 | `eval/eval_dynamic_temperature.py` | 3 ablation | (config-driven) |
@@ -98,8 +98,11 @@ JSONL is written incrementally (every 100 batches) — survives interruption. Th
 | `eval/statistical_tests.py` | significance | — |
 | `figures/plot_all.py` | viz orchestrator | — |
 | `figures/plot_*.py` (8 scripts) | viz | — |
+| `scripts/diagnose_hld_repro.py` | HLD reproduction diagnostics: annotation/cache audit, stored-vs-regex-vs-substring scoring, cached PNG vs SimpleStream reference frame selection, and Qwen3 processor encoding comparison | — |
+| `scripts/cache_ovo_recent_frames.py` | writes SimpleStream recent-window PNG caches from OVO chunk videos, optionally deleting mp4s after cache validation | — |
+| `scripts/eval_hld_progress.py` | small HLD eval helper with per-sample progress logging and resumable JSONL output | — |
 | `scripts/download_data.sh` / `download_mini_data.sh` / `download_ovo_sources.py` | data download | — |
-| `scripts/download_extract_chunked.py` | **preferred** stream-download + extract HF `chunked_videos.tar.part*` directly to `chunked_videos/`, deleting each tar part as soon as it is consumed | — |
+| `scripts/download_extract_chunked.py` | **preferred** stream-download + extract HF `chunked_videos.tar.part*` directly to `chunked_videos/`, deleting each tar part as soon as it is consumed; `--include_list` restores only named mp4s from the streamed archive | — |
 | `scripts/extract_chunk_frames.py --input_dir … --output_dir … [--delete_source]` | **D:\ space reclaim**: walks `chunked_videos/*.mp4`, extracts last-32 frames as PNG (short-edge 384) + meta.json per chunk to `chunked_frames/<id>/`, optionally deletes the mp4. Idempotent — skips dirs where meta.json + png count already match. | — |
 | `scripts/prepare_mini_data.py` / `prepare_ovo_subset.py` / `chunk_ovo_subset.py` / `extract_ovo_src_subset.py` | data prep (local chunking path, fallback) | — |
 | `scripts/smoke_qwen8b_load.py` | preflight | — |
@@ -146,6 +149,8 @@ PowerShell variants: `scripts/prepare_ovo_subset_pipeline.ps1`, `scripts/run_sim
 | `tests/compare_simplestream.py` | per-task delta vs SimpleStream Qwen3-VL 4f published numbers (`OCR…OJR` realtime + `EPM/ASI/HLD` backward) |
 | `tests/analyze_variance.py` | Wilson 95% CI per task vs OVO-Bench paper — flags noise-equivalent vs statistically distinguishable |
 | `tests/analyze_simplestream_ci.py` | same but vs SimpleStream paper |
+| `tests/test_diagnose_hld_repro.py` | no-GPU checks for HLD annotation audit, scoring split, and PNG cache metadata adapters |
+| `tests/test_qwen3_builder.py` | no-GPU checks for the SimpleStream Qwen3 explicit per-frame input-id builder |
 
 No `pytest.ini`/`conftest.py`/`pyproject.toml`. Coverage gaps: **no test exercises `train_lora.py` or `train_full_ft.py`**; choice-extraction is tested via re-implementation in `smoke_test.py` (lines 649-780) rather than direct import.
 
@@ -185,6 +190,10 @@ D:\ssd_video_data\
 **Per-ratio subset directories are gone.** Earlier the pipeline materialised `ovo_subset_1pct/`, `ovo_subset_10pct/`, etc. — each with its own `src_videos\` + `chunked_videos\`. After the dataset-level sampling refactor (`OVOBenchDataset.sample_ratio`) we keep one fullset on D:\ and sample at load time, which saves ~50 GB per ratio and avoids cross-subset drift.
 
 HF model cache lives on D:\ too (`D:\hf_cache\`) via `HF_HOME` env var. **Set `HF_HOME=D:/hf_cache` + `FORCE_QWENVL_VIDEO_READER=decord` + `PYTHONIOENCODING=utf-8` before any eval run** — defaults land model weights on C:\ and torchvision's PyAV reader is broken in this env.
+
+### SimpleStream Qwen3 Reproduction Notes
+
+The official `EvolvingLMMs-Lab/SimpleStream` Qwen3 OVO path does not use the plain Qwen `apply_chat_template(... add_generation_prompt=True)` path. It encodes the selected frames first, emits one explicit `<|vision_start|>...<|vision_end|>` block per frame, computes Qwen3 rope position IDs manually, then calls `generate` from `inputs_embeds`. Use `inference.simplestream_qwen3_per_frame_builder: true` to enable that path. `configs/eval_ovo_hld_precomputed4_t4_int8_qwen3builder.yaml` replays the C:\ 4-frame HLD PNG cache with this builder and `max_new_tokens: 256`; model/HF cache still belongs on D:\.
 
 ## Known rough edges
 

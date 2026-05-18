@@ -18,6 +18,13 @@ Usage
         --output_dir D:/ssd_video_data/chunked_videos \\
         --tar_glob "chunked_videos.tar.part*"
 
+To restore only a subset of videos, pass a newline-delimited include list:
+
+    python -u scripts/download_extract_chunked.py \\
+        --parts_dir D:/ssd_video_data/_chunked_parts \\
+        --output_dir D:/ssd_video_data/chunked_videos \\
+        --include_list results/diagnostics/hld_repro/hld_chunk_include.txt
+
 Notes
 -----
 - Requires ``huggingface_hub``. Set ``HF_HOME=D:/hf_cache`` if you want the
@@ -41,7 +48,7 @@ import threading
 import time
 from pathlib import Path, PurePosixPath
 from queue import Queue
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Set
 
 
 def gb(num_bytes: int) -> float:
@@ -172,7 +179,7 @@ class RollingPartReader:
             self.current = None
 
 
-def safe_output_path(output_dir: Path, member_name: str) -> Optional[Path]:
+def member_relative_path(member_name: str) -> Optional[PurePosixPath]:
     normalized = member_name.replace("\\", "/").lstrip("./")
     relative = PurePosixPath(normalized)
     if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
@@ -182,20 +189,63 @@ def safe_output_path(output_dir: Path, member_name: str) -> Optional[Path]:
         relative = PurePosixPath(*relative.parts[1:])
     if not relative.parts:
         return None
+    return relative
+
+
+def member_include_key(member_name: str) -> Optional[str]:
+    relative = member_relative_path(member_name)
+    if relative is None:
+        return None
+    return relative.as_posix()
+
+
+def safe_output_path(output_dir: Path, member_name: str) -> Optional[Path]:
+    relative = member_relative_path(member_name)
+    if relative is None:
+        return None
     return output_dir.joinpath(*relative.parts)
 
 
-def extract_stream(reader: RollingPartReader, output_dir: Path) -> int:
+def load_include_names(include_list: Optional[str]) -> Optional[Set[str]]:
+    if not include_list:
+        return None
+    include_path = Path(include_list)
+    names: Set[str] = set()
+    for line_no, raw_line in enumerate(include_path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key = member_include_key(line)
+        if key is None:
+            raise SystemExit(f"Invalid include_list entry at {include_path}:{line_no}: {raw_line!r}")
+        names.add(key)
+    if not names:
+        raise SystemExit(f"include_list {include_path} did not contain any file names")
+    return names
+
+
+def extract_stream(reader: RollingPartReader, output_dir: Path, include_names: Optional[Set[str]] = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     count = 0
+    matched = 0
+    remaining = set(include_names) if include_names is not None else None
     with tarfile.open(fileobj=reader, mode="r|*") as tar:
         for member in tar:
             if not member.isfile():
+                continue
+            include_key = member_include_key(member.name)
+            if include_key is None:
+                print(f"[extract] skipping unsafe member {member.name!r}", flush=True)
+                continue
+            if include_names is not None and include_key not in include_names:
                 continue
             dst = safe_output_path(output_dir, member.name)
             if dst is None:
                 print(f"[extract] skipping unsafe member {member.name!r}", flush=True)
                 continue
+            if remaining is not None and include_key in remaining:
+                remaining.remove(include_key)
+                matched += 1
             if dst.exists() and dst.stat().st_size > 0:
                 # already extracted in a previous run
                 src = tar.extractfile(member)
@@ -211,6 +261,18 @@ def extract_stream(reader: RollingPartReader, output_dir: Path) -> int:
             count += 1
             if count % 100 == 0:
                 print(f"[extract] wrote {count} files (latest: {dst.name})", flush=True)
+            elif include_names is not None and count % 25 == 0:
+                print(f"[extract] wrote {count}/{len(include_names)} requested files", flush=True)
+    if include_names is not None:
+        missing = len(remaining or set())
+        print(
+            f"[extract] include list matched {matched}/{len(include_names)} members; "
+            f"missing {missing}",
+            flush=True,
+        )
+        if missing:
+            preview = ", ".join(sorted(remaining or set())[:10])
+            print(f"[extract] missing preview: {preview}", flush=True)
     return count
 
 
@@ -246,6 +308,10 @@ def main() -> None:
     parser.add_argument("--parts_dir", required=True, help="Temporary directory for downloaded tar parts (gets emptied)")
     parser.add_argument("--output_dir", required=True, help="Destination directory for extracted chunked videos")
     parser.add_argument(
+        "--include_list",
+        help="Optional newline-delimited member list; only these videos are extracted from the streamed tar",
+    )
+    parser.add_argument(
         "--max_parts_ahead",
         type=int,
         default=2,
@@ -261,6 +327,9 @@ def main() -> None:
     print(f"Remote parts to fetch: {len(remote_parts)}", flush=True)
     for name in remote_parts:
         print(f"  {name}", flush=True)
+    include_names = load_include_names(args.include_list)
+    if include_names is not None:
+        print(f"Filtering extraction to {len(include_names)} requested files", flush=True)
 
     queue: "Queue[Path]" = Queue(maxsize=max(1, int(args.max_parts_ahead)))
     error_box: List[Exception] = []
@@ -274,7 +343,7 @@ def main() -> None:
     # Total bytes ~ 152 GB; not exact, only used for progress reporting.
     reader = RollingPartReader(iter_downloaded_parts(queue), total_bytes=int(152 * 1024 ** 3))
     try:
-        count = extract_stream(reader, output_dir)
+        count = extract_stream(reader, output_dir, include_names=include_names)
     finally:
         reader.close()
 

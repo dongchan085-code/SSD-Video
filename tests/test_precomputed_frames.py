@@ -37,6 +37,8 @@ def _stub_torch() -> None:
     utils_mod = types.ModuleType("torch.utils")
     data_mod = types.ModuleType("torch.utils.data")
     data_mod.Dataset = object
+    data_mod.DataLoader = MagicMock()
+    data_mod.random_split = MagicMock()
     utils_mod.data = data_mod
     torch_mod.utils = utils_mod
     torch_mod.Tensor = MagicMock()

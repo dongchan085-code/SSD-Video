@@ -105,8 +105,6 @@ def _extract_one(
 
     frames_np, _ = read_video_frames(
         video_path=video_path,
-        cache_dir=None,
-        enable_cache=False,
         frame_indices=indices,
     )
 

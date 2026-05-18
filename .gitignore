@@ -51,6 +51,7 @@ data/
 outputs/
 results/
 checkpoints/
+.hf_cache*/
 *.mp4
 *.avi
 
