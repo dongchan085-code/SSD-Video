@@ -182,7 +182,7 @@ conda run -n env_ssd_simplestream python scripts/diagnose_hld_repro.py score-com
 
 ## Current Interpretation
 
-Qwen3-VL-8B HLD performance still does not match the 52.1% SimpleStream target on this T4/int8/precomputed4 setup. The explicit Qwen3 per-frame builder improves over the completed non-builder int8 run by about +3.23 pp (44.62% vs 41.40%), but it remains about -7.48 pp below the published target.
+Qwen3-VL-8B HLD performance now matches the 52.1% SimpleStream target when the T4/int8/sdpa run uses the official Qwen3 dependency pins (`transformers==4.57.6`, `accelerate==1.12.0`). The earlier low score was primarily a Transformers/Accelerate runtime mismatch, not annotation, prompt, frame selection, or scoring.
 
 ## 2026-05-18 Diagnosis Update
 
@@ -219,3 +219,99 @@ Still worth checking only if exact official hardware is available:
 
 - Run upstream SimpleStream unchanged in an environment pinned to `requirements-qwen3.txt`, with bf16 + flash-attention on supported GPUs.
 - Compare pixel hashes or processor tensors for a sample of cached PNGs against upstream decode output; current diagnostics compare frame timing/counts, not full pixel identity.
+
+## 2026-05-18 Official-Dependency T4 Rerun
+
+Environment:
+
+- Conda prefix: `D:/conda_envs/env_ssd_simplestream_officialdeps`
+- Created by cloning `env_ssd_simplestream`, then installing `transformers==4.57.6` and `accelerate==1.12.0`.
+- Verified versions: `transformers 4.57.6`, `accelerate 1.12.0`, `torch 2.5.1`, CUDA 12.4, `bitsandbytes 0.49.2`.
+- Runtime remained T4-constrained: `dtype=float16`, `load_in_8bit=true`, `attn_implementation=sdpa`, single T4, precomputed PNG replay.
+
+Configuration:
+
+- `configs/eval_ovo_hld_precomputed4_t4_int8_qwen3builder_officialdeps.yaml`
+
+Result files:
+
+- `results/ovo_simplestream_fullset/qwen3vl8b_int8_hld_precomputed4_qwen3builder_t4_officialdeps.json`
+- `results/ovo_simplestream_fullset/qwen3vl8b_int8_hld_precomputed4_qwen3builder_t4_officialdeps.partial_predictions.jsonl`
+
+Command:
+
+```powershell
+$env:PYTHONPATH='C:/work/SSD-Video'
+$env:HF_HOME='D:/hf_cache'
+$env:HUGGINGFACE_HUB_CACHE='D:/hf_cache/hub'
+$env:TRANSFORMERS_CACHE='D:/hf_cache/transformers'
+$env:HF_HUB_DISABLE_SYMLINKS_WARNING='1'
+$env:FORCE_QWENVL_VIDEO_READER='decord'
+$env:PYTHONIOENCODING='utf-8'
+conda run -p D:\conda_envs\env_ssd_simplestream_officialdeps python -u eval/eval_ovo_bench.py `
+  --config configs/eval_ovo_hld_precomputed4_t4_int8_qwen3builder_officialdeps.yaml `
+  --model_path Qwen/Qwen3-VL-8B-Instruct `
+  --data_path C:/work/SSD-Video/data/ovo_hld_recent4 `
+  --output_file results/ovo_simplestream_fullset/qwen3vl8b_int8_hld_precomputed4_qwen3builder_t4_officialdeps.json `
+  --task_filter HLD `
+  --sample_ratio 1.0
+```
+
+Final metric:
+
+- 186 / 186 HLD samples completed.
+- Stored/release-regex accuracy: 100 / 186 = 53.7634%.
+- Official substring rescoring: 54.3011%.
+- Gap vs 52.1 target: +1.6634 pp stored, +2.2011 pp official-substring.
+- Wilson 95% CI: 46.59% to 60.78%; 52.1% is inside the interval.
+- Mean latency: 9176.8 ms; p50: 8463.2 ms; p95: 18730.6 ms.
+- Reported peak allocated GPU memory: 13.83 GB.
+
+Comparison against the previous `transformers 5.8.0` / `accelerate 1.13.0` qwen3builder run:
+
+- Previous: 83 / 186 = 44.6237%.
+- Official-deps rerun: 100 / 186 = 53.7634%.
+- Delta: +17 correct, +9.1398 pp.
+- Row-level correctness flips: 25 total; 21 false-to-true, 4 true-to-false.
+
+Conclusion:
+
+- The HLD gap is reproduced as a dependency/runtime issue. Pinning the official Qwen3 Transformers/Accelerate stack is enough for the T4 int8/sdpa run to meet or exceed the 52.1 target.
+- The run still is not bit-for-bit official hardware parity because it uses int8 + fp16 + sdpa + single T4 instead of unquantized bf16 + flash-attention on 4 GPUs, but the HLD score target is now matched.
+
+## Random Seed Analysis
+
+SimpleStream's OVO Qwen3 script uses Python randomness only for deterministic annotation ordering:
+
+- `main_experiments/eval_qwen3vl_ovo.py` calls `random.seed(42)` and then shuffles the backward, realtime, and forward annotation lists.
+- The shuffle affects evaluation order and multi-GPU shard assignment. It affects the evaluated subset only when `--max_samples_per_split` is used.
+- Full HLD evaluation over all 186 rows should not change accuracy because of this shuffle.
+
+Generation itself is greedy:
+
+- `lib/recent_window_eval.py` calls `model.generate(..., do_sample=False)`.
+- With `do_sample=False`, temperature/top-p/top-k sampling randomness is not active. Positive temperature scaling would not change argmax token choice, and Transformers warns that sampling flags such as `top_k` may be ignored.
+- Remaining differences can still come from dependency versions, quantization, attention kernels, or low-level GPU non-determinism, but not from sampling seed in the normal sense.
+
+## 2026-05-18 Full-Precision CPU-Offload Smoke
+
+Configuration:
+
+- `configs/eval_ovo_hld_precomputed4_t4_full_cpuoffload_smoke.yaml`
+
+Result files:
+
+- `results/ovo_simplestream_fullset/qwen3vl8b_full_cpuoffload_hld_precomputed4_qwen3builder_t4_smoke.json`
+- `results/ovo_simplestream_fullset/qwen3vl8b_full_cpuoffload_hld_precomputed4_qwen3builder_t4_smoke.partial_predictions.jsonl`
+
+Runtime:
+
+- `dtype=float16`, `load_in_8bit=false`, `load_in_4bit=false`, `device_map=auto`, `max_memory: {0: 12GiB, cpu: 16GiB}`, `attn_implementation=sdpa`.
+- Model load emitted the expected Accelerate warning that some parameters were offloaded to CPU.
+
+Smoke result:
+
+- 10 / 10 samples completed.
+- Accuracy: 5 / 10 = 50.0%.
+- For these first 10 HLD rows, predictions exactly matched the official-deps int8 run.
+- Generation latency was roughly 7-10 seconds per sample after model load. A full 186-row CPU-offload run is possible in principle but is not a strong use of T4 time unless more evidence is needed.

@@ -1,0 +1,58 @@
+# HLD-only 4-frame PNG replay with official SimpleStream Qwen3 dependency pins
+# in the external env at D:/conda_envs/env_ssd_simplestream_officialdeps.
+# Runtime remains T4-constrained: int8 + fp16 + sdpa.
+
+model:
+  model_id: Qwen/Qwen3-VL-8B-Instruct
+  dtype: float16
+  device_map: cuda
+  load_in_8bit: true
+  load_in_4bit: false
+  attn_implementation: sdpa
+
+inference:
+  num_frames: 4
+  recent_frames_only: 4
+  chunk_duration: 1.0
+  fps: 1.0
+  frame_sampling_strategy: simplestream
+  resize_shortest_edge: 224
+  max_new_tokens: 256
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 1
+  do_sample: false
+  use_cache: true
+  use_simplestream_decode: true
+  simplestream_qwen3_per_frame_builder: true
+  simplestream_single_vision_block: false
+
+data:
+  dataset_name: ovo_bench
+  data_path: C:/work/SSD-Video/data/ovo_hld_recent4
+  anno_path: C:/work/SSD-Video/data/ovo_hld_recent4/ovo_bench_hld.json
+  chunked_dir: C:/work/SSD-Video/data/ovo_hld_recent4/chunked_videos
+  split: test
+  batch_size: 1
+  num_workers: 2
+  use_precomputed_frames: true
+  chunked_frames_dir: C:/work/SSD-Video/data/ovo_hld_recent4/chunked_frames
+
+evaluation:
+  metrics:
+    - accuracy
+    - per_task_accuracy
+    - lock_fork_split
+  save_predictions: true
+  output_format: json
+  save_detailed_results: true
+  resume_partial: true
+  partial_predictions_file: ./results/ovo_simplestream_fullset/qwen3vl8b_int8_hld_precomputed4_qwen3builder_t4_officialdeps.partial_predictions.jsonl
+
+logging:
+  log_level: INFO
+  log_interval: 25
+
+hardware:
+  cuda_visible_devices: 0
+  seed: 42
