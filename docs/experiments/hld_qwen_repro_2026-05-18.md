@@ -202,7 +202,8 @@ Current local T4 reproduction conditions:
 
 Additional observations:
 
-- HLD ground-truth option text is always `Unable to answer`; the score is effectively the rate at which the model selects the option letter containing `Unable to answer`.
+- In the local HLD-only subset (`data/ovo_hld_recent4/ovo_bench_hld.json`), the HLD ground-truth option text is always `Unable to answer`. This is not a statement about every OVO-Bench task; it is specific to the HLD subset used for this reproduction.
+- For this HLD subset, the score is effectively the rate at which the model selects the option letter containing `Unable to answer`.
 - The qwen3builder run selected the `Unable to answer` option 83 / 186 times, exactly matching the 83 correct rows.
 - Hitting 52.1% on this 186-row HLD subset would require about 97 correct rows, i.e. 14 more `Unable to answer` selections than the current int8/T4 run.
 - The precomputed PNG cache is being used (`use_precomputed_frames=true`), has 186 HLD frame directories, and all cached `meta.json` files report `resize_shortest_edge=null`, `saved_count=4`. The cached image sizes are Qwen-style multiples/ranges such as 560-1008 wide by 336-672 high.
