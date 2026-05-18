@@ -183,3 +183,38 @@ conda run -n env_ssd_simplestream python scripts/diagnose_hld_repro.py score-com
 ## Current Interpretation
 
 Qwen3-VL-8B HLD performance still does not match the 52.1% SimpleStream target on this T4/int8/precomputed4 setup. The explicit Qwen3 per-frame builder improves over the completed non-builder int8 run by about +3.23 pp (44.62% vs 41.40%), but it remains about -7.48 pp below the published target.
+
+## 2026-05-18 Diagnosis Update
+
+The most likely cause of the remaining gap is a runtime/reproduction-condition mismatch, not annotation, prompt, frame selection, or scoring.
+
+Confirmed official SimpleStream Qwen3 conditions from the upstream release:
+
+- `main_experiments/run_qwen3vl_ovo_4gpu.sh` runs 4 processes with `--mixed_precision bf16`, `recent_frames_only=4`, and no quantization.
+- `lib/recent_window_eval_qwen3.py` loads `Qwen/Qwen3-VL-8B-Instruct` with `torch_dtype=torch.bfloat16` and `attn_implementation="flash_attention_2"`.
+- `requirements-qwen3.txt` pins `transformers==4.57.6` and `accelerate==1.12.0`.
+
+Current local T4 reproduction conditions:
+
+- `configs/eval_ovo_hld_precomputed4_t4_int8_qwen3builder.yaml` uses `dtype=float16`, `load_in_8bit=true`, `attn_implementation=sdpa`, one T4, and precomputed PNG replay.
+- `env_ssd_simplestream` currently reports `transformers 5.8.0`, `accelerate 1.13.0`, `torch 2.5.1`, CUDA 12.4.
+- This means the local run differs from the release on precision, quantization, attention backend, GPU execution mode, and Transformers/Accelerate versions.
+
+Additional observations:
+
+- HLD ground-truth option text is always `Unable to answer`; the score is effectively the rate at which the model selects the option letter containing `Unable to answer`.
+- The qwen3builder run selected the `Unable to answer` option 83 / 186 times, exactly matching the 83 correct rows.
+- Hitting 52.1% on this 186-row HLD subset would require about 97 correct rows, i.e. 14 more `Unable to answer` selections than the current int8/T4 run.
+- The precomputed PNG cache is being used (`use_precomputed_frames=true`), has 186 HLD frame directories, and all cached `meta.json` files report `resize_shortest_edge=null`, `saved_count=4`. The cached image sizes are Qwen-style multiples/ranges such as 560-1008 wide by 336-672 high.
+
+Ruled out or unlikely:
+
+- Official substring rescoring does not change the qwen3builder result.
+- HLD annotation/cache coverage and prompt manifest checks pass.
+- Sampled SimpleStream reference frame comparison found no timestamp, chunk-id, or frame-count mismatches on the checked samples.
+- The explicit per-frame Qwen3 builder is now aligned with the upstream input construction path.
+
+Still worth checking only if exact official hardware is available:
+
+- Run upstream SimpleStream unchanged in an environment pinned to `requirements-qwen3.txt`, with bf16 + flash-attention on supported GPUs.
+- Compare pixel hashes or processor tensors for a sample of cached PNGs against upstream decode output; current diagnostics compare frame timing/counts, not full pixel identity.
