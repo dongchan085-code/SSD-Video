@@ -19,6 +19,7 @@ from ssd_vlm.data.perception_test_dataset import PerceptionTestDataset
 from ssd_vlm.model_loading import load_vlm_processor_and_model
 from ssd_vlm.simplestream import format_ovo_prompt
 from ssd_vlm.utils.config import load_config
+from ssd_vlm.utils.seed import seed_worker, set_global_seed
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,7 @@ class SSDSampleGenerator:
             pin_memory=True,
             shuffle=False,
             collate_fn=lambda batch: batch[0],
+            worker_init_fn=seed_worker,
         )
 
         output_file = open(output_path, 'w')
@@ -241,6 +243,7 @@ def main():
 
     # Load config and apply any --set overrides
     config = load_config(args.config)
+    set_global_seed(int(config.get("seed", 42)))
     for override in args.overrides:
         if "=" not in override:
             raise ValueError(f"--set override must be section.key=value, got: {override!r}")

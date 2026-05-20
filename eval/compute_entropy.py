@@ -103,8 +103,17 @@ class EntropyComputer:
 
         return {"entropy": entropy, "probs": probs}
 
-    def _rank_of_gt(self, probs: torch.Tensor, answer_idx: int) -> int:
-        """Return 1-indexed rank of the ground-truth answer token."""
+    def _rank_of_gt(self, probs: torch.Tensor, answer_idx: Any) -> int:
+        """Return 1-indexed rank of the ground-truth answer token.
+
+        Only defined for A..D multiple-choice tasks. Forward tasks
+        (REC count / SSR/CRR bool) pass a non-letter GT and get -1.
+        """
+        # bool is a subclass of int in Python — exclude SSR/CRR (True/False GT).
+        if isinstance(answer_idx, bool):
+            return -1
+        if not isinstance(answer_idx, int) or not (0 <= answer_idx < len(self.answer_token_ids)):
+            return -1
         gt_token_id = self.answer_token_ids[answer_idx]
         sorted_ids = torch.argsort(probs, descending=True)
         rank = (sorted_ids == gt_token_id).nonzero(as_tuple=True)[0]

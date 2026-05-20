@@ -175,18 +175,32 @@ def save_checkpoint(
     return checkpoint_path
 
 
-def load_checkpoint(checkpoint_path: str, model: nn.Module, optimizer: Optional[Optimizer] = None):
-    """Load training checkpoint."""
+def load_checkpoint(
+    checkpoint_path: str,
+    model: nn.Module,
+    optimizer: Optional[Optimizer] = None,
+    scheduler: Optional[object] = None,
+):
+    """Load training checkpoint.
+
+    Restores model weights, optimizer state, and LR scheduler state when
+    provided. Returns ``(epoch, step)`` so the caller can resume bookkeeping.
+    save_checkpoint() always writes scheduler_state_dict; passing scheduler
+    here keeps the LR curve continuous across restarts.
+    """
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    
+
     model.load_state_dict(checkpoint["model_state_dict"])
-    
+
     if optimizer is not None and "optimizer_state_dict" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    
+
+    if scheduler is not None and "scheduler_state_dict" in checkpoint:
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
     epoch = checkpoint.get("epoch", 0)
     step = checkpoint.get("step", 0)
-    
+
     logger.info(f"Checkpoint loaded from {checkpoint_path} (epoch {epoch}, step {step})")
-    
+
     return epoch, step

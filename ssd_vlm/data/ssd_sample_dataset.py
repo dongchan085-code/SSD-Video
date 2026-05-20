@@ -18,6 +18,7 @@ from ssd_vlm.data.video_utils import (
     load_video_frames_dual,
     resolve_video_path,
 )
+from ssd_vlm.utils.seed import seed_worker
 
 logger = logging.getLogger(__name__)
 
@@ -302,6 +303,7 @@ def _make_loader(
         drop_last=drop_last and len(dataset) >= batch_size,
         persistent_workers=persistent_workers if use_workers else False,
         prefetch_factor=prefetch_factor if use_workers else None,
+        worker_init_fn=seed_worker if use_workers else None,
     )
 
 

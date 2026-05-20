@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional, Sequence
 
 from eval_ovo_bench import OVOBenchEvaluator
 
-from ssd_vlm.simplestream import extract_choice
+from ssd_vlm.simplestream import score_prediction
 from ssd_vlm.utils.config import load_config
 
 logger = logging.getLogger(__name__)
@@ -58,18 +58,22 @@ class DynamicTemperatureEvaluator(OVOBenchEvaluator):
 
             temperature_usage[temperature] = temperature_usage.get(temperature, 0) + 1
 
+            frames = sample.get("frame_images", sample["frames"])
             answer_text = self._generate_answer(
                 question=sample["question"],
                 options=sample["options"],
-                frames=sample["frames"],
+                frames=frames,
+                task_type=task_type,
                 temperature=temperature,
                 top_k=top_k,
             )
-            answer_idx = extract_choice(answer_text)
-            if answer_idx is None:
-                answer_idx = 0
-
-            is_correct = answer_idx == sample["answer_idx"]
+            # Route through simplestream.score_prediction so REC/SSR/CRR
+            # ground truth (count / type→bool) is handled correctly instead of
+            # being collapsed by extract_choice — which silently scored ~0 on
+            # forward tasks.
+            scored = score_prediction(task_type, answer_text, sample["answer_idx"])
+            predicted = scored["predicted"]
+            is_correct = bool(scored["correct"])
             correct += int(is_correct)
             total += 1
 
@@ -83,8 +87,8 @@ class DynamicTemperatureEvaluator(OVOBenchEvaluator):
                 "question": sample["question"],
                 "task_type": task_type,
                 "temperature_used": temperature,
-                "ground_truth": sample["answer_idx"],
-                "predicted": answer_idx,
+                "ground_truth": scored["ground_truth"],
+                "predicted": predicted,
                 "answer_text": answer_text,
                 "correct": is_correct,
             })

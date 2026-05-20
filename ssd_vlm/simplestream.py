@@ -112,13 +112,20 @@ def extract_number(text: str) -> Optional[int]:
 
 
 def extract_yes_no(text: str) -> Optional[bool]:
-    """Mirror SimpleStream's score_yesno substring rule."""
+    """Mirror SimpleStream's score_yesno substring rule.
+
+    The substring rule is intentional and matches SimpleStream verbatim — so
+    "NONE" / "KNOW" / "ANNOTATION" return False because they contain "NO".
+    Keep parity rather than tightening, otherwise SSR/CRR numbers drift from
+    the published leaderboard. The check order is: "NO" first (and "N"
+    standalone), then "YES" (and "Y" standalone).
+    """
     if text is None or not str(text).strip():
         return None
     s = str(text).strip().upper()
-    if s == "N" or "NO" in s:
+    if (s == "N") or ("NO" in s):
         return False
-    if s == "Y" or "YES" in s:
+    if (s == "Y") or ("YES" in s):
         return True
     return None
 

@@ -28,6 +28,7 @@ from ssd_vlm.training.utils import (
     save_checkpoint,
 )
 from ssd_vlm.utils.config import load_config
+from ssd_vlm.utils.seed import set_global_seed
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +252,7 @@ def main():
     # Load config
     config = load_config(args.config)
     logger.info(f"Loaded config from {args.config}")
+    set_global_seed(int(config.get("seed", 42)))
     
     # Determine model path (merged LoRA or base model)
     model_path = args.lora_checkpoint

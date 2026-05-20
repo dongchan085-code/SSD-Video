@@ -15,8 +15,9 @@ ssd_vlm/
 ├── simplestream.py                  # OVO prompt formatting, scoring, task groups (LOCK/FORK)
 ├── eval_metrics.py                  # summarize_ovo_predictions() — aggregation logic split out of eval_ovo_bench.py
 ├── utils/
-│   ├── __init__.py                  # re-exports load_config
-│   └── config.py                    # load_config() with extends: deep-merge
+│   ├── __init__.py                  # re-exports load_config, set_global_seed, seed_worker
+│   ├── config.py                    # load_config() with extends: deep-merge
+│   └── seed.py                      # set_global_seed() + seed_worker for DataLoader determinism
 ├── sampling/
 │   └── generate_samples.py          # Stage 1 entry — SSDSampleGenerator class
 ├── training/
@@ -48,6 +49,8 @@ ssd_vlm/
 | `_forward_question_and_gt(task, anno, test_info, fallback)` | `ssd_vlm/data/ovo_bench_dataset.py` | REC/SSR/CRR ground-truth and question construction (count / type→bool / annotation question) |
 | `_stratified_sample(samples, ratio, seed, min_per_task)` | `ssd_vlm/data/ovo_bench_dataset.py` | sample fractions of the dataset at load time without per-ratio subset dirs |
 | `CosineWarmupScheduler`, `save_checkpoint`, `log_model_info` | `ssd_vlm/training/utils.py` | both trainers |
+| `load_checkpoint(path, model, optimizer=None, scheduler=None)` | `ssd_vlm/training/utils.py` | restores model + optimizer + LR scheduler state; returns `(epoch, step)` |
+| `set_global_seed(seed, *, deterministic=False)` / `seed_worker(worker_id)` | `ssd_vlm/utils/seed.py` | called at top of `generate_samples.py` / `train_lora.py` / `train_full_ft.py`; DataLoaders wire `seed_worker` as `worker_init_fn` |
 | `load_video_frames_dual(..., use_simplestream_decode=False, precomputed_frame_dir=None)` | `ssd_vlm/data/video_utils.py` | all three dataset classes; flags swap decode path |
 | `load_precomputed_frames(frame_dir, num_frames, *, expected_fps, expected_chunk_duration)` | `ssd_vlm/data/video_utils.py` | reads last N PNGs + meta.json written by `extract_chunk_frames.py`; raises ValueError on fps/chunk_duration mismatch |
 | `resolve_frame_dir(data_path, video_id, chunked_frames_dir=None)` | `ssd_vlm/data/video_utils.py` | returns `<chunked_frames>/<video_id>/` if meta.json present, else None |
@@ -153,6 +156,8 @@ PowerShell variants: `scripts/prepare_ovo_subset_pipeline.ps1`, `scripts/run_sim
 | `tests/test_qwen3_builder.py` | no-GPU checks for the SimpleStream Qwen3 explicit per-frame input-id builder |
 
 No `pytest.ini`/`conftest.py`/`pyproject.toml`. Coverage gaps: **no test exercises `train_lora.py` or `train_full_ft.py`**; choice-extraction is tested via re-implementation in `smoke_test.py` (lines 649-780) rather than direct import.
+
+| `tests/test_seed.py` | `set_global_seed` determinism across python/numpy/torch + `seed_worker` smoke |
 
 | `tests/test_precomputed_frames.py` | `load_precomputed_frames`, `resolve_frame_dir`, `extract_chunk_frames._extract_one` round-trip; 10 pass / 3 skip (cv2-dependent extractor tests skip without OpenCV) |
 
